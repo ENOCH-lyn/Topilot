@@ -14,6 +14,7 @@ Openclaw等项目消耗Token速度普遍较快，但是很多功能在日常生�
 
 - Telegram 机器人接入与 Chat ID 白名单控制
 - Copilot CLI 会话功能与多会话切换
+- 快捷接管运行中的会话，方便用户在手机上继续进行会话
 - 流式传输结果
 - 工具调用过程等展示
 
@@ -49,7 +50,8 @@ python -m copilot_in_telegram.main
 - `COPILOT_CLI_MODEL`：默认选择的模型
 - `COPILOT_CLI_TIMEOUT_SECONDS`：单次 Copilot CLI 调用超时
 - `COPILOT_CLI_REASONING_EFFORT`：可选，Copilot模型思考深度
-- `COPILOT_MODELS`：可用模型列表，逗号分隔（留空使用内置默认列表），可在 `/model` 中选择
+- `COPILOT_MODELS`：可选，手动指定可用模型列表（逗号分隔），实时获取失败时可作为回退
+- `SESSION_WATCH_INTERVAL_SECONDS`：接管会话后历史对话内容自动追踪的轮询间隔秒数
 - `LOG_FILE_PATH`：日志文件路径（默认 `WORKSPACE_ROOT/logs/app.log`）
 - `LOG_LEVEL`：文件日志级别（默认 `INFO`）
 - `CONSOLE_LOG_LEVEL`：控制台日志级别（默认 `INFO`）
@@ -60,7 +62,7 @@ python -m copilot_in_telegram.main
 - `/whoami`：查看当前 chat/user 信息
 - `/llm`：查看 Copilot CLI 后端状态
 - `/session_current`：查看当前会话 ID
-- `/sessions`：列出会话
+- `/sessions`：按钮化会话管理入口（列表/接管/历史/删除）
 - `/session_new [title]`：新建并切换会话
 - `/session_use <session_id前缀>`：切换会话
 - `/model`：查看/切换当前模型（内联按钮选择）

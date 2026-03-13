@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 
@@ -56,6 +57,12 @@ class SessionStore:
             self._payload["sessions"][key] = sessions
         return sessions
 
+    def _find_session(self, chat_id: int, session_id: str) -> dict[str, Any] | None:
+        for item in self._chat_sessions(chat_id):
+            if str(item.get("id", "")) == session_id:
+                return item
+        return None
+
     def ensure_active_session(self, chat_id: int) -> str:
         """确保 chat 存在可用会话，不存在则自动创建"""
 
@@ -89,6 +96,44 @@ class SessionStore:
         self.save()
         return session_id
 
+    def upsert_session(
+        self,
+        chat_id: int,
+        session_id: str,
+        title: str | None = None,
+        cwd: str | None = None,
+        model: str | None = None,
+        source: str = "discovered",
+        last_event_at: str | None = None,
+        running: bool | None = None,
+    ) -> dict[str, Any]:
+        """新增或更新会话元数据"""
+
+        existing = self._find_session(chat_id, session_id)
+        if existing is None:
+            existing = {
+                "id": session_id,
+                "title": title or "adopted-session",
+                "created_at": _now_iso(),
+                "last_used_at": _now_iso(),
+            }
+            self._chat_sessions(chat_id).insert(0, existing)
+
+        if title:
+            existing["title"] = title
+        if cwd:
+            existing["cwd"] = cwd
+        if model:
+            existing["model"] = model
+        existing["source"] = source
+        if last_event_at:
+            existing["last_event_at"] = last_event_at
+        if running is not None:
+            existing["running"] = running
+        existing["last_used_at"] = _now_iso()
+        self.save()
+        return existing
+
     def list_sessions(self, chat_id: int, limit: int = 20) -> list[dict]:
         """按最近使用时间排序返回会话列表"""
 
@@ -110,6 +155,29 @@ class SessionStore:
                 self.save()
                 return session_id
         return None
+
+    def delete_session(self, chat_id: int, session_id: str) -> bool:
+        """删除会话记录"""
+
+        sessions = self._chat_sessions(chat_id)
+        before = len(sessions)
+        sessions[:] = [item for item in sessions if str(item.get("id", "")) != session_id]
+        changed = len(sessions) != before
+
+        key = self._chat_key(chat_id)
+        if self._payload.get("active", {}).get(key) == session_id:
+            self._payload.setdefault("active", {}).pop(key, None)
+            changed = True
+
+        if changed:
+            self.save()
+        return changed
+
+    def get_session(self, chat_id: int, session_id: str) -> dict[str, Any] | None:
+        """按会话 ID 获取会话元数据"""
+
+        item = self._find_session(chat_id, session_id)
+        return dict(item) if item else None
 
     def touch(self, chat_id: int, session_id: str) -> None:
         """更新会话最近使用时间"""

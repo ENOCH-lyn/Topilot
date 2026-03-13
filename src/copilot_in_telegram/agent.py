@@ -45,6 +45,7 @@ class AssistantPlanner:
         history: list[ChatTurn],
         instruction: str,
         model: str | None = None,
+        workspace_dir: str | None = None,
         progress_logger: ProgressLogger | None = None,
         reply_streamer: ReplyStreamer | None = None,
     ) -> PlannedAction:
@@ -57,6 +58,7 @@ class AssistantPlanner:
                     history,
                     instruction,
                     model=model,
+                    workspace_dir=workspace_dir,
                     progress_logger=progress_logger,
                     reply_streamer=reply_streamer,
                 )
@@ -137,23 +139,31 @@ class AssistantPlanner:
         history: list[ChatTurn],
         instruction: str,
         model: str | None = None,
+        workspace_dir: str | None = None,
         progress_logger: ProgressLogger | None = None,
         reply_streamer: ReplyStreamer | None = None,
     ) -> PlannedAction:
         """调用 Copilot CLI 并实时消费 JSONL 输出"""
 
         prompt = self._build_copilot_prompt(history, instruction)
-        argv = self._build_copilot_argv(prompt, session_id, model=model)
+        effective_model = model or self._settings.copilot_cli_model
+        argv = self._build_copilot_argv(prompt, session_id, model=effective_model, workspace_dir=workspace_dir)
         if self._settings.copilot_cli_allow_all_tools:
             argv.append("--allow-all-tools")
+
+        effective_cwd = self._settings.workspace_root
+        if workspace_dir:
+            candidate = Path(workspace_dir)
+            if candidate.exists() and candidate.is_dir():
+                effective_cwd = candidate
 
         process = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=self._settings.workspace_root.as_posix(),
+            cwd=effective_cwd.as_posix(),
         )
-        logger.info("Copilot CLI 启动 session=%s model=%s", session_id, self._settings.copilot_cli_model)
+        logger.info("Copilot CLI 启动 session=%s model=%s cwd=%s", session_id, effective_model, effective_cwd)
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
 
@@ -441,7 +451,13 @@ class AssistantPlanner:
                     return value.strip()
         return ""
 
-    def _build_copilot_argv(self, prompt: str, session_id: str, model: str | None = None) -> list[str]:
+    def _build_copilot_argv(
+        self,
+        prompt: str,
+        session_id: str,
+        model: str | None = None,
+        workspace_dir: str | None = None,
+    ) -> list[str]:
         command = self._resolve_copilot_command()
         effective_model = model or self._settings.copilot_cli_model
         base_args = [
@@ -458,7 +474,8 @@ class AssistantPlanner:
         if self._settings.copilot_cli_reasoning_effort:
             base_args.extend(["--reasoning-effort", self._settings.copilot_cli_reasoning_effort])
         if self._settings.copilot_cli_add_workspace_dir:
-            base_args.extend(["--add-dir", self._settings.workspace_root.as_posix()])
+            add_dir = workspace_dir or self._settings.workspace_root.as_posix()
+            base_args.extend(["--add-dir", add_dir])
         if command.lower().endswith(".ps1"):
             return [
                 "powershell",

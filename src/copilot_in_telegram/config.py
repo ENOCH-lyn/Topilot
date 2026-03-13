@@ -37,6 +37,7 @@ class Settings:
     log_level: str
     console_log_level: str
     httpx_log_level: str
+    session_watch_interval_seconds: float
 
 
 class ConfigurationError(RuntimeError):
@@ -65,6 +66,17 @@ def _parse_chat_ids(value: str | None) -> set[int]:
             continue
         result.add(int(stripped))
     return result
+
+
+def _parse_float(value: str | None, default: float) -> float:
+    """将字符串环境变量解析为浮点数"""
+
+    if value is None:
+        return default
+    try:
+        return float(value.strip())
+    except ValueError:
+        return default
 
 
 def load_settings() -> Settings:
@@ -102,4 +114,5 @@ def load_settings() -> Settings:
         log_level=(os.getenv("LOG_LEVEL", "INFO").strip() or "INFO").upper(),
         console_log_level=(os.getenv("CONSOLE_LOG_LEVEL", "INFO").strip() or "INFO").upper(),
         httpx_log_level=(os.getenv("HTTPX_LOG_LEVEL", "WARNING").strip() or "WARNING").upper(),
+        session_watch_interval_seconds=_parse_float(os.getenv("SESSION_WATCH_INTERVAL_SECONDS"), 4.0),
     )

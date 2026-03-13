@@ -47,6 +47,7 @@ def build_application(settings: Settings) -> Application:
     """构建并返回 Telegram Application 实例"""
 
     application: Application | None = None
+    session_watch_tasks: dict[int, asyncio.Task[None]] = {}
 
     class TelegramLiveProgress:
         """Telegram 端流式展示实现"""
@@ -340,7 +341,7 @@ def build_application(settings: Settings) -> Application:
     async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
             return
-        await update.effective_message.reply_text(runner.session_list_text(update.effective_chat.id))
+        await _send_session_menu(update.effective_message, update.effective_chat.id, page=0)
 
     async def session_new_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
@@ -406,6 +407,145 @@ def build_application(settings: Settings) -> Application:
         except Exception:
             pass
 
+    async def session_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not query or not query.data:
+            return
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if not chat_id or not _is_allowed(settings, chat_id):
+            await query.answer("未授权", show_alert=True)
+            return
+
+        data = query.data
+        await query.answer()
+
+        if data.startswith("smenu:"):
+            page_text = data.split(":", 1)[1]
+            page = int(page_text) if page_text.isdigit() else 0
+            await _edit_session_menu(query, chat_id, page=page)
+            return
+
+        if data.startswith("sopen:"):
+            sid = data.split(":", 1)[1]
+            await _edit_session_detail(query, chat_id, sid)
+            return
+
+        if data.startswith("suse:"):
+            sid = data.split(":", 1)[1]
+            text = runner.takeover_session(chat_id, sid)
+            try:
+                await query.edit_message_text(f"✓ {text}")
+            except Exception:
+                pass
+
+            payload = runner.session_live_payload(chat_id, sid)
+            history_msg = await application.bot.send_message(chat_id=chat_id, text=_trim_telegram_text(str(payload.get("text", ""))))
+
+            await _stop_session_watch(chat_id)
+            if bool(payload.get("running", False)):
+                session_watch_tasks[chat_id] = asyncio.create_task(_watch_session_live(chat_id, sid, history_msg.chat_id, history_msg.message_id))
+            return
+
+        if data.startswith("shis:"):
+            sid = data.split(":", 1)[1]
+            history_text = runner.session_history_text(chat_id, sid)
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("刷新历史", callback_data=f"shis:{sid}")],
+                    [InlineKeyboardButton("返回详情", callback_data=f"sopen:{sid}")],
+                    [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
+                ]
+            )
+            await query.edit_message_text(history_text, reply_markup=keyboard)
+            return
+
+        if data.startswith("sdel:"):
+            sid = data.split(":", 1)[1]
+            text = runner.delete_session(chat_id, sid, delete_local=True)
+            await _edit_session_menu(query, chat_id, page=0, prefix=text)
+            return
+
+    async def _send_session_menu(message: Message, chat_id: int, page: int = 0) -> None:
+        items = runner.session_menu_items(chat_id, limit=30)
+        text, keyboard = _render_session_menu(items, page)
+        await message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def _edit_session_menu(query, chat_id: int, page: int = 0, prefix: str | None = None) -> None:
+        items = runner.session_menu_items(chat_id, limit=30)
+        text, keyboard = _render_session_menu(items, page)
+        if prefix:
+            text = f"{prefix}\n\n{text}"
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def _edit_session_detail(query, chat_id: int, session_id: str, prefix: str | None = None) -> None:
+        text = runner.session_detail_text(chat_id, session_id)
+        if prefix:
+            text = f"{prefix}\n\n{text}"
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("接管会话", callback_data=f"suse:{session_id}")],
+                [InlineKeyboardButton("查看历史", callback_data=f"shis:{session_id}")],
+                [InlineKeyboardButton("刷新详情", callback_data=f"sopen:{session_id}")],
+                [InlineKeyboardButton("删除会话", callback_data=f"sdel:{session_id}")],
+                [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
+            ]
+        )
+        await query.edit_message_text(text, reply_markup=keyboard)
+
+    async def _stop_session_watch(chat_id: int) -> None:
+        task = session_watch_tasks.pop(chat_id, None)
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def _watch_session_live(chat_id: int, session_id: str, message_chat_id: int, message_id: int) -> None:
+        """轮询会话历史，运行中时自动刷新同一条消息"""
+        interval = max(1.0, min(settings.session_watch_interval_seconds, 15.0))
+        last_signature = ""
+        stable_rounds = 0
+        try:
+            for _ in range(150):
+                payload = runner.session_live_payload(chat_id, session_id)
+                text = _trim_telegram_text(str(payload.get("text", "")))
+                signature = str(payload.get("signature", ""))
+                running = bool(payload.get("running", False))
+
+                if signature != last_signature:
+                    last_signature = signature
+                    stable_rounds = 0
+                    try:
+                        await application.bot.edit_message_text(
+                            chat_id=message_chat_id,
+                            message_id=message_id,
+                            text=text,
+                        )
+                    except BadRequest as exc:
+                        if "Message is not modified" not in str(exc):
+                            raise
+                else:
+                    stable_rounds += 1
+
+                if not running and stable_rounds >= 3:
+                    final_text = _trim_telegram_text(text + "\n\n会话已停止，自动追踪结束")
+                    try:
+                        await application.bot.edit_message_text(
+                            chat_id=message_chat_id,
+                            message_id=message_id,
+                            text=final_text,
+                        )
+                    except BadRequest as exc:
+                        if "Message is not modified" not in str(exc):
+                            raise
+                    break
+
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            pass
+
     builder = ApplicationBuilder().token(settings.telegram_bot_token)
     if settings.telegram_proxy_url:
         builder = builder.proxy(settings.telegram_proxy_url).get_updates_proxy(settings.telegram_proxy_url)
@@ -423,6 +563,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("help", restricted(settings, help_command)))
     application.add_handler(CommandHandler("status", restricted(settings, status_command)))
     application.add_handler(CallbackQueryHandler(model_select_callback, pattern=r"^model_sel:"))
+    application.add_handler(CallbackQueryHandler(session_callback, pattern=r"^(smenu:|sopen:|suse:|shis:|sdel:)"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, restricted(settings, text_message)))
 
     return application
@@ -454,3 +595,42 @@ def _build_model_keyboard(models: list[str], current: str) -> list[list[InlineKe
     if row:
         keyboard.append(row)
     return keyboard
+
+
+def _trim_telegram_text(text: str, limit: int = 3500) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
+def _render_session_menu(items: list[dict], page: int, page_size: int = 6) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    total = len(items)
+    if total == 0:
+        return "未发现可管理会话", [[InlineKeyboardButton("刷新", callback_data="smenu:0")]]
+
+    max_page = max((total - 1) // page_size, 0)
+    page = max(0, min(page, max_page))
+    start = page * page_size
+    current_items = items[start : start + page_size]
+
+    lines = [f"会话管理 第 {page + 1}/{max_page + 1} 页"]
+    keyboard: list[list[InlineKeyboardButton]] = []
+
+    for item in current_items:
+        sid = str(item.get("id", ""))
+        short_sid = sid[:8]
+        model = str(item.get("model") or "unknown")
+        running = "🟢" if item.get("running") else "⚪"
+        active = "⭐" if item.get("active") else ""
+        lines.append(f"{running}{active} {short_sid} | {model}")
+        keyboard.append([InlineKeyboardButton(f"打开 {short_sid}", callback_data=f"sopen:{sid}")])
+
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("上一页", callback_data=f"smenu:{page - 1}"))
+    nav.append(InlineKeyboardButton("刷新", callback_data=f"smenu:{page}"))
+    if page < max_page:
+        nav.append(InlineKeyboardButton("下一页", callback_data=f"smenu:{page + 1}"))
+    keyboard.append(nav)
+
+    return "\n".join(lines), keyboard
