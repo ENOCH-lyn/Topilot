@@ -8,6 +8,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+def _parse_models(value: str | None) -> list[str]:
+    """解析内容为模型列表"""
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 
 @dataclass(slots=True)
 class Settings:
@@ -26,6 +32,7 @@ class Settings:
     copilot_cli_add_workspace_dir: bool
     copilot_cli_reasoning_effort: str | None
     copilot_cli_forward_reasoning: bool
+    copilot_available_models: list[str]
     log_file_path: Path
     log_level: str
     console_log_level: str
@@ -90,6 +97,7 @@ def load_settings() -> Settings:
         copilot_cli_add_workspace_dir=_parse_bool(os.getenv("COPILOT_CLI_ADD_WORKSPACE_DIR"), True),
         copilot_cli_reasoning_effort=os.getenv("COPILOT_CLI_REASONING_EFFORT", "").strip() or None,
         copilot_cli_forward_reasoning=_parse_bool(os.getenv("COPILOT_CLI_FORWARD_REASONING"), True),
+        copilot_available_models=_parse_models(os.getenv("COPILOT_MODELS")),
         log_file_path=log_file_path,
         log_level=(os.getenv("LOG_LEVEL", "INFO").strip() or "INFO").upper(),
         console_log_level=(os.getenv("CONSOLE_LOG_LEVEL", "INFO").strip() or "INFO").upper(),

@@ -1,17 +1,14 @@
 from __future__ import annotations
-"""Telegram 机器人接入层
-
-负责命令路由、权限校验、消息发送与流式消息更新
-"""
+"""Telegram 机器人接入层"""
 
 import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
 
-from telegram import Message, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.error import BadRequest
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from copilot_in_telegram.config import Settings
 from copilot_in_telegram.task_runner import TaskRunner
@@ -301,6 +298,7 @@ def build_application(settings: Settings) -> Application:
             "/sessions\n"
             "/session_new [title]\n"
             "/session_use <session_id前缀>\n"
+            "/model\n"
             "/status\n"
             "也可直接发送文本"
         )
@@ -314,6 +312,7 @@ def build_application(settings: Settings) -> Application:
             "/sessions\n"
             "/session_new [title]\n"
             "/session_use <session_id前缀>\n"
+            "/model\n"
             "/status\n"
             "也可直接发送文本"
         )
@@ -329,9 +328,9 @@ def build_application(settings: Settings) -> Application:
         )
 
     async def llm_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.effective_message:
+        if not update.effective_message or not update.effective_chat:
             return
-        await update.effective_message.reply_text(f"后端状态: {runner.llm_status_text()}")
+        await update.effective_message.reply_text(f"后端状态: {runner.llm_status_text(update.effective_chat.id)}")
 
     async def session_current_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
@@ -368,6 +367,45 @@ def build_application(settings: Settings) -> Application:
         logger.info("收到文本消息 chat_id=%s", update.effective_chat.id)
         await runner.submit(update.effective_chat.id, update.effective_message.text)
 
+    async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """展示模型选择按钮"""
+        if not update.effective_message or not update.effective_chat:
+            return
+        chat_id = update.effective_chat.id
+        models = runner.list_models()
+        if not models:
+            await update.effective_message.reply_text("暂时无法获取可用模型列表，当前无法修改模型")
+            return
+        current = runner.current_model(chat_id)
+        keyboard = _build_model_keyboard(models, current)
+        await update.effective_message.reply_text(
+            f"当前模型: {current}\n请选择模型:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    async def model_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """处理模型选择按钮回调"""
+        query = update.callback_query
+        if not query or not query.data:
+            return
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if not chat_id or not _is_allowed(settings, chat_id):
+            await query.answer("未授权", show_alert=True)
+            return
+        model = query.data[len("model_sel:"):]
+        if not model:
+            await query.answer()
+            return
+        if model not in runner.list_models():
+            await query.answer("模型不存在", show_alert=True)
+            return
+        runner.set_model(chat_id, model)
+        await query.answer(f"已切换: {model}")
+        try:
+            await query.edit_message_text(f"✓ 当前模型: {model}")
+        except Exception:
+            pass
+
     builder = ApplicationBuilder().token(settings.telegram_bot_token)
     if settings.telegram_proxy_url:
         builder = builder.proxy(settings.telegram_proxy_url).get_updates_proxy(settings.telegram_proxy_url)
@@ -380,9 +418,11 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("sessions", restricted(settings, sessions_command)))
     application.add_handler(CommandHandler("session_new", restricted(settings, session_new_command)))
     application.add_handler(CommandHandler("session_use", restricted(settings, session_use_command)))
+    application.add_handler(CommandHandler("model", restricted(settings, model_command)))
     application.add_handler(CommandHandler("start", restricted(settings, start_command)))
     application.add_handler(CommandHandler("help", restricted(settings, help_command)))
     application.add_handler(CommandHandler("status", restricted(settings, status_command)))
+    application.add_handler(CallbackQueryHandler(model_select_callback, pattern=r"^model_sel:"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, restricted(settings, text_message)))
 
     return application
@@ -399,3 +439,18 @@ def _chunk_text(text: str, limit: int = 3500) -> list[str]:
         chunks.append(remaining[:limit])
         remaining = remaining[limit:]
     return chunks
+
+
+def _build_model_keyboard(models: list[str], current: str) -> list[list[InlineKeyboardButton]]:
+    """构建模型选择内联键盘（2列布局，当前模型标 ✓）"""
+    keyboard: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for model in models:
+        label = f"✓ {model}" if model == current else model
+        row.append(InlineKeyboardButton(label, callback_data=f"model_sel:{model}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    return keyboard

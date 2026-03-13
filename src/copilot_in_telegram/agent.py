@@ -44,6 +44,7 @@ class AssistantPlanner:
         session_id: str,
         history: list[ChatTurn],
         instruction: str,
+        model: str | None = None,
         progress_logger: ProgressLogger | None = None,
         reply_streamer: ReplyStreamer | None = None,
     ) -> PlannedAction:
@@ -55,6 +56,7 @@ class AssistantPlanner:
                     session_id,
                     history,
                     instruction,
+                    model=model,
                     progress_logger=progress_logger,
                     reply_streamer=reply_streamer,
                 )
@@ -84,11 +86,12 @@ class AssistantPlanner:
             "Copilot CLI 当前不可用，请确认Copilot CLI已正确安装并登录，COPILOT_CLI_COMMAND已正确配置"
         )
 
-    def llm_status_text(self) -> str:
+    def llm_status_text(self, model: str | None = None) -> str:
         """返回当前 Copilot CLI 状态文本"""
 
         if self._copilot_cli_ready():
-            return f"Copilot CLI 已启用（model={self._settings.copilot_cli_model}）"
+            effective = model or self._settings.copilot_cli_model
+            return f"Copilot CLI 已启用（model={effective}）"
 
         copilot_reasons: list[str] = []
         if not self._settings.copilot_cli_command:
@@ -101,18 +104,46 @@ class AssistantPlanner:
     def _copilot_cli_ready(self) -> bool:
         return bool(self._settings.copilot_cli_command)
 
+    async def fetch_available_models(self) -> list[str]:
+        """从 copilot --help 实时解析可用模型列表
+
+        解析 CLI 输出中 --model <model> 对应的 choices
+        获取失败时返回配置中的 COPILOT_MODELS
+        """
+        try:
+            command = self._resolve_copilot_command()
+            proc = await asyncio.create_subprocess_exec(
+                command, "--help",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            raw, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+            text = raw.decode(errors="replace")
+            # 匹配 --model 说明段中的 choices 列表
+            m = re.search(r"--model\s+<model>.*?choices:\s*(.*?)\)", text, re.DOTALL)
+            if m:
+                models = re.findall(r'"([^"]+)"', m.group(1))
+                if models:
+                    logger.info("实时获取到 %d 个可用模型", len(models))
+                    return models
+        except Exception as exc:
+            logger.warning("获取模型列表失败: %s", exc)
+        # 回退到显式配置列表
+        return list(self._settings.copilot_available_models)
+
     async def _plan_with_copilot_cli(
         self,
         session_id: str,
         history: list[ChatTurn],
         instruction: str,
+        model: str | None = None,
         progress_logger: ProgressLogger | None = None,
         reply_streamer: ReplyStreamer | None = None,
     ) -> PlannedAction:
         """调用 Copilot CLI 并实时消费 JSONL 输出"""
 
         prompt = self._build_copilot_prompt(history, instruction)
-        argv = self._build_copilot_argv(prompt, session_id)
+        argv = self._build_copilot_argv(prompt, session_id, model=model)
         if self._settings.copilot_cli_allow_all_tools:
             argv.append("--allow-all-tools")
 
@@ -410,13 +441,14 @@ class AssistantPlanner:
                     return value.strip()
         return ""
 
-    def _build_copilot_argv(self, prompt: str, session_id: str) -> list[str]:
+    def _build_copilot_argv(self, prompt: str, session_id: str, model: str | None = None) -> list[str]:
         command = self._resolve_copilot_command()
+        effective_model = model or self._settings.copilot_cli_model
         base_args = [
             "--resume",
             session_id,
             "--model",
-            self._settings.copilot_cli_model,
+            effective_model,
             "--output-format",
             "json",
             "-p",

@@ -37,6 +37,7 @@ class SessionStore:
             payload = {"active": {}, "sessions": {}}
         payload.setdefault("active", {})
         payload.setdefault("sessions", {})
+        payload.setdefault("models", {})
         self._payload = payload
 
     def save(self) -> None:
@@ -121,3 +122,17 @@ class SessionStore:
                 break
         if changed:
             self.save()
+
+    def active_model(self, chat_id: int) -> str | None:
+        """返回当前 chat 选择的模型（若未设置则返回 None）"""
+        key = self._chat_key(chat_id)
+        value = self._payload.get("models", {}).get(key)
+        if isinstance(value, str) and value:
+            return value
+        return None
+
+    def set_model(self, chat_id: int, model: str) -> None:
+        """为指定 chat 保存模型选择"""
+        key = self._chat_key(chat_id)
+        self._payload.setdefault("models", {})[key] = model
+        self.save()

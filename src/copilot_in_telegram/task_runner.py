@@ -1,11 +1,5 @@
 from __future__ import annotations
-"""对话编排模块
-
-负责：
-- 衔接会话存储与 Planner
-- 管理流式过程输出
-- 写入对话历史
-"""
+"""对话编排模块"""
 
 import logging
 from collections.abc import Awaitable, Callable
@@ -44,11 +38,13 @@ class TaskRunner:
         self._conversation = ConversationStore(settings.chat_db_path)
         self._sessions = SessionStore(settings.session_db_path)
         self._planner = AssistantPlanner(settings)
+        # 启动后会被实时结果覆盖
+        self._cached_models: list[str] = list(settings.copilot_available_models)
 
     async def start(self) -> None:
-        """预留启动钩子"""
-
-        return
+        """启动时拉取实时模型列表并缓存"""
+        self._cached_models = await self._planner.fetch_available_models()
+        logger.info("可用模型: %s", self._cached_models)
 
     async def submit(self, chat_id: int, instruction: str) -> None:
         """处理一次用户请求并回传结果"""
@@ -60,11 +56,13 @@ class TaskRunner:
         self._sessions.touch(chat_id, active_session_id)
 
         live_progress = await self._start_live_progress(chat_id, instruction)
+        model = self._sessions.active_model(chat_id)
         try:
             plan = await self._planner.plan(
                 active_session_id,
                 history,
                 instruction,
+                model=model,
                 progress_logger=live_progress.log if live_progress else None,
                 reply_streamer=live_progress.reply if live_progress else None,
             )
@@ -103,11 +101,29 @@ class TaskRunner:
         """返回后端状态与当前会话信息"""
 
         session_id = self._sessions.ensure_active_session(chat_id)
-        return f"后端状态: {self._planner.llm_status_text()}\n当前会话: {session_id}"
+        model = self._sessions.active_model(chat_id)
+        return f"后端状态: {self._planner.llm_status_text(model)}\n当前会话: {session_id}"
 
-    def llm_status_text(self) -> str:
+    def llm_status_text(self, chat_id: int | None = None) -> str:
         """返回 LLM 状态文本"""
-        return self._planner.llm_status_text()
+        model = self._sessions.active_model(chat_id) if chat_id is not None else None
+        return self._planner.llm_status_text(model)
+
+    def current_model(self, chat_id: int) -> str:
+        """返回当前 chat 有效的模型"""
+        return self._sessions.active_model(chat_id) or self._settings.copilot_cli_model
+
+    def list_models(self) -> list[str]:
+        """返回可用模型列表
+
+        数据来源是启动时拉取并缓存的结果
+        """
+        return list(self._cached_models)
+
+    def set_model(self, chat_id: int, model: str) -> None:
+        """为指定 chat 设置当前模型"""
+        self._sessions.set_model(chat_id, model)
+        logger.info("模型已切换 chat_id=%s model=%s", chat_id, model)
 
     def session_current_text(self, chat_id: int) -> str:
         """返回当前会话 ID"""

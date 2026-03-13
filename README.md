@@ -49,6 +49,7 @@ python -m copilot_in_telegram.main
 - `COPILOT_CLI_MODEL`：默认选择的模型
 - `COPILOT_CLI_TIMEOUT_SECONDS`：单次 Copilot CLI 调用超时
 - `COPILOT_CLI_REASONING_EFFORT`：可选，Copilot模型思考深度
+- `COPILOT_MODELS`：可用模型列表，逗号分隔（留空使用内置默认列表），可在 `/model` 中选择
 - `LOG_FILE_PATH`：日志文件路径（默认 `WORKSPACE_ROOT/logs/app.log`）
 - `LOG_LEVEL`：文件日志级别（默认 `INFO`）
 - `CONSOLE_LOG_LEVEL`：控制台日志级别（默认 `INFO`）
@@ -62,6 +63,7 @@ python -m copilot_in_telegram.main
 - `/sessions`：列出会话
 - `/session_new [title]`：新建并切换会话
 - `/session_use <session_id前缀>`：切换会话
+- `/model`：查看/切换当前模型（内联按钮选择）
 - `/status`：查看运行状态
 - 直接发送文本将进入 Copilot 对话
 

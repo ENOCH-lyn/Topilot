@@ -1,6 +1,5 @@
 from __future__ import annotations
-"""数据模型定义
-"""
+"""数据模型定义"""
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
