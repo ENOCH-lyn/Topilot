@@ -22,7 +22,6 @@ class Settings:
     copilot_cli_add_workspace_dir: bool
     copilot_cli_reasoning_effort: str | None
     copilot_cli_forward_reasoning: bool
-    copilot_cli_reasoning_max_chars: int
 
 
 class ConfigurationError(RuntimeError):
@@ -51,7 +50,7 @@ def load_settings() -> Settings:
     load_dotenv()
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
-        raise ConfigurationError("Missing TELEGRAM_BOT_TOKEN.")
+        raise ConfigurationError("请配置TELEGRAM_BOT_TOKEN")
 
     workspace_root = Path(os.getenv("WORKSPACE_ROOT", Path.cwd().as_posix())).resolve()
     chat_db_path = Path(os.getenv("CHAT_DB_PATH", workspace_root / "data" / "chats.json")).resolve()
@@ -66,12 +65,11 @@ def load_settings() -> Settings:
         chat_db_path=chat_db_path,
         session_db_path=session_db_path,
         telegram_proxy_url=os.getenv("TELEGRAM_PROXY_URL", "").strip() or None,
-        copilot_cli_command=os.getenv("COPILOT_CLI_COMMAND", "copilot").strip() or "copilot",
-        copilot_cli_model=os.getenv("COPILOT_CLI_MODEL", "gpt-5.3-codex").strip() or "gpt-5.3-codex",
-        copilot_cli_timeout_seconds=int(os.getenv("COPILOT_CLI_TIMEOUT_SECONDS", "120")),
+        copilot_cli_command=os.getenv("COPILOT_CLI_COMMAND").strip() or "copilot",
+        copilot_cli_model=os.getenv("COPILOT_CLI_MODEL").strip() or "gpt-4.1",
+        copilot_cli_timeout_seconds=int(os.getenv("COPILOT_CLI_TIMEOUT_SECONDS", "3600")),
         copilot_cli_allow_all_tools=_parse_bool(os.getenv("COPILOT_CLI_ALLOW_ALL_TOOLS"), True),
         copilot_cli_add_workspace_dir=_parse_bool(os.getenv("COPILOT_CLI_ADD_WORKSPACE_DIR"), True),
         copilot_cli_reasoning_effort=os.getenv("COPILOT_CLI_REASONING_EFFORT", "").strip() or None,
         copilot_cli_forward_reasoning=_parse_bool(os.getenv("COPILOT_CLI_FORWARD_REASONING"), True),
-        copilot_cli_reasoning_max_chars=int(os.getenv("COPILOT_CLI_REASONING_MAX_CHARS", "0")),
     )

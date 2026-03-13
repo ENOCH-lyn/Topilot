@@ -50,17 +50,17 @@ class AssistantPlanner:
             except Exception as exc:
                 return PlannedAction(
                     action_type=ActionType.RESPOND_ONLY,
-                    summary="Copilot CLI 调用失败，回退到本地规则",
+                    summary="Copilot CLI 调用失败",
                     assistant_message=(
-                        "Copilot CLI 当前调用失败，已回退到本地规则模式。\n"
+                        "Copilot CLI 当前调用失败。\n"
                         f"错误: {str(exc)[:200]}\n"
-                        "先在终端执行 `copilot login`，然后用 /llm 检查状态。"
+                        "请检查 copilot 登录状态与命令配置，然后重试"
                     ),
                 )
 
         return PlannedAction(
             action_type=ActionType.RESPOND_ONLY,
-            summary="未启用 Copilot CLI，使用本地规则",
+            summary="Copilot CLI 未就绪",
             assistant_message=self.fallback_response(),
         )
 
@@ -68,7 +68,7 @@ class AssistantPlanner:
         reason = self.llm_status_text()
         return (
             f"当前后端状态: {reason}\n"
-            "Copilot CLI 当前不可用"
+            "Copilot CLI 当前不可用，请确认Copilot CLI已正确安装并登录，COPILOT_CLI_COMMAND已正确配置"
         )
 
     def llm_status_text(self) -> str:
@@ -137,7 +137,7 @@ class AssistantPlanner:
         except TimeoutError as exc:
             process.kill()
             await process.wait()
-            raise RuntimeError("Copilot CLI 超时。") from exc
+            raise RuntimeError("Copilot CLI 超时") from exc
 
         out_text = "\n".join(stdout_lines).strip()
         err_text = "\n".join(stderr_lines).strip()
@@ -179,12 +179,9 @@ class AssistantPlanner:
         final_reply, reasoning = self._extract_copilot_jsonl_parts(raw_content)
         text = (final_reply or raw_content).strip()
         if not text:
-            text = "Copilot 返回了空内容，请重试。"
+            text = "Copilot 返回内容为空，请检查配置"
         if len(text) > 4000:
             text = text[:4000] + "..."
-        reasoning_cap = self._settings.copilot_cli_reasoning_max_chars
-        if reasoning_cap > 0 and len(reasoning) > reasoning_cap:
-            reasoning = reasoning[:reasoning_cap] + "..."
         return PlannedAction(
             action_type=ActionType.RESPOND_ONLY,
             summary="Copilot 对话回复",

@@ -77,7 +77,7 @@ class TaskRunner:
     def history_text(self, chat_id: int) -> str:
         turns = self._conversation.recent(chat_id, limit=12)
         if not turns:
-            return "暂无对话记录。"
+            return "暂无对话记录"
         lines = []
         for turn in turns:
             role = "你" if turn.role == "user" else "Copilot"
@@ -93,7 +93,7 @@ class TaskRunner:
 
     def reset_text(self, chat_id: int) -> str:
         self._conversation.reset_chat(chat_id)
-        return "当前 chat 的会话记忆已清空。"
+        return "当前 chat 的会话记忆已清空"
 
     def llm_status_text(self) -> str:
         return self._planner.llm_status_text()
@@ -105,7 +105,7 @@ class TaskRunner:
     def session_list_text(self, chat_id: int) -> str:
         sessions = self._sessions.list_sessions(chat_id, limit=12)
         if not sessions:
-            return "暂无会话。可用 /session_new 新建。"
+            return "暂无会话。可用 /session_new 新建"
         active = self._sessions.active_session(chat_id)
         lines = []
         for item in sessions:

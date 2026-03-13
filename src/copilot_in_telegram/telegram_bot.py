@@ -27,7 +27,7 @@ def restricted(settings: Settings, handler: Handler) -> Handler:
         chat_id = update.effective_chat.id if update.effective_chat else None
         if not _is_allowed(settings, chat_id):
             if update.effective_message:
-                await update.effective_message.reply_text("当前 chat 未授权。先发 /whoami 获取 chat id，再把它加入 TELEGRAM_ALLOWED_CHAT_IDS。")
+                await update.effective_message.reply_text("当前用户未授权。请使用 /whoami 获取 chat id，再把将其加入到 TELEGRAM_ALLOWED_CHAT_IDS中")
             return
         await handler(update, context)
 
@@ -235,7 +235,6 @@ def build_application(settings: Settings) -> Application:
                 "[user.message]",
                 "report_intent",
                 "[subagent.completed]",
-                "调用工具: sql",
             )
             return any(flag in lowered for flag in noisy)
 
@@ -286,13 +285,18 @@ def build_application(settings: Settings) -> Application:
 
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(
-            "建议用法:\n"
-            "/whoami 查看当前 chat id\n"
-            "/llm 查看 Copilot 后端状态\n"
-            "/session_current 查看当前会话\n"
-            "/sessions 列出会话历史\n"
-            "/session_new 新建会话\n"
-            "/session_use <id前缀> 切换会话\n"
+            "可用命令:\n"
+            "/whoami\n"
+            "/llm\n"
+            "/session_current\n"
+            "/sessions\n"
+            "/session_new [title]\n"
+            "/session_use <session_id前缀>\n"
+            "/run <指令>\n"
+            "/status\n"
+            "/history\n"
+            "/reset\n"
+            "也可直接发送文本"
         )
 
     async def whoami_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -330,18 +334,9 @@ def build_application(settings: Settings) -> Application:
         if not update.effective_message or not update.effective_chat:
             return
         if not context.args:
-            await update.effective_message.reply_text("请提供会话 ID 前缀。")
+            await update.effective_message.reply_text("请提供会话 ID 前缀")
             return
         await update.effective_message.reply_text(runner.session_use_text(update.effective_chat.id, context.args[0]))
-
-    async def run_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.effective_message or not update.effective_chat:
-            return
-        instruction = " ".join(context.args).strip()
-        if not instruction:
-            await update.effective_message.reply_text("请提供要执行的指令。")
-            return
-        await runner.submit(update.effective_chat.id, instruction)
 
     async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
@@ -377,7 +372,6 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("session_use", restricted(settings, session_use_command)))
     application.add_handler(CommandHandler("start", restricted(settings, start_command)))
     application.add_handler(CommandHandler("help", restricted(settings, help_command)))
-    application.add_handler(CommandHandler("run", restricted(settings, run_command)))
     application.add_handler(CommandHandler("status", restricted(settings, status_command)))
     application.add_handler(CommandHandler("history", restricted(settings, history_command)))
     application.add_handler(CommandHandler("reset", restricted(settings, reset_command)))
