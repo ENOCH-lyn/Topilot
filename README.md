@@ -49,6 +49,10 @@ python -m copilot_in_telegram.main
 - `COPILOT_CLI_MODEL`：默认选择的模型
 - `COPILOT_CLI_TIMEOUT_SECONDS`：单次 Copilot CLI 调用超时
 - `COPILOT_CLI_REASONING_EFFORT`：可选，Copilot模型思考深度
+- `LOG_FILE_PATH`：日志文件路径（默认 `WORKSPACE_ROOT/logs/app.log`）
+- `LOG_LEVEL`：文件日志级别（默认 `INFO`）
+- `CONSOLE_LOG_LEVEL`：控制台日志级别（默认 `INFO`）
+- `HTTPX_LOG_LEVEL`：`httpx` 日志级别（默认 `WARNING`，避免 Telegram 轮询日志刷屏）
 
 ## Bot 可用命令
 

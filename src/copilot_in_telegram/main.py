@@ -1,10 +1,14 @@
 from __future__ import annotations
 """程序入口模块"""
 
+import logging
 import os
 
 from copilot_in_telegram.config import ConfigurationError, load_settings
+from copilot_in_telegram.logging_setup import configure_logging
 from copilot_in_telegram.telegram_bot import build_application
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -14,6 +18,8 @@ def main() -> None:
         settings = load_settings()
     except ConfigurationError as exc:
         raise SystemExit(str(exc)) from exc
+
+    configure_logging(settings)
 
     if settings.telegram_proxy_url:
         os.environ.setdefault("HTTP_PROXY", settings.telegram_proxy_url)

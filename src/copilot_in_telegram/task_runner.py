@@ -7,6 +7,7 @@ from __future__ import annotations
 - 写入对话历史
 """
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
@@ -16,6 +17,8 @@ from copilot_in_telegram.conversation_store import ConversationStore
 from copilot_in_telegram.session_store import SessionStore
 
 SendMessage = Callable[[int, str], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 
 class LiveProgress(Protocol):
@@ -50,6 +53,8 @@ class TaskRunner:
     async def submit(self, chat_id: int, instruction: str) -> None:
         """处理一次用户请求并回传结果"""
 
+        logger.info("收到请求 chat_id=%s instruction_len=%s", chat_id, len(instruction.strip()))
+
         history = self._conversation.recent(chat_id)
         active_session_id = self._sessions.ensure_active_session(chat_id)
         self._sessions.touch(chat_id, active_session_id)
@@ -64,6 +69,7 @@ class TaskRunner:
                 reply_streamer=live_progress.reply if live_progress else None,
             )
         except Exception:
+            logger.exception("请求处理失败 chat_id=%s session=%s", chat_id, active_session_id)
             if live_progress:
                 await live_progress.close(failed=True)
             raise
@@ -80,6 +86,8 @@ class TaskRunner:
             await live_progress.close(final_text=reply)
         else:
             await self._send_message(chat_id, reply)
+
+        logger.info("请求处理完成 chat_id=%s session=%s reply_len=%s", chat_id, active_session_id, len(reply))
 
     async def _start_live_progress(self, chat_id: int, instruction: str) -> LiveProgress | None:
         """按需创建流式展示对象"""

@@ -26,6 +26,10 @@ class Settings:
     copilot_cli_add_workspace_dir: bool
     copilot_cli_reasoning_effort: str | None
     copilot_cli_forward_reasoning: bool
+    log_file_path: Path
+    log_level: str
+    console_log_level: str
+    httpx_log_level: str
 
 
 class ConfigurationError(RuntimeError):
@@ -67,8 +71,10 @@ def load_settings() -> Settings:
     workspace_root = Path(os.getenv("WORKSPACE_ROOT", Path.cwd().as_posix())).resolve()
     chat_db_path = Path(os.getenv("CHAT_DB_PATH", workspace_root / "data" / "chats.json")).resolve()
     session_db_path = Path(os.getenv("SESSION_DB_PATH", workspace_root / "data" / "sessions.json")).resolve()
+    log_file_path = Path(os.getenv("LOG_FILE_PATH", workspace_root / "data" / "app.log")).resolve()
     chat_db_path.parent.mkdir(parents=True, exist_ok=True)
     session_db_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
     return Settings(
         telegram_bot_token=token,
@@ -84,4 +90,8 @@ def load_settings() -> Settings:
         copilot_cli_add_workspace_dir=_parse_bool(os.getenv("COPILOT_CLI_ADD_WORKSPACE_DIR"), True),
         copilot_cli_reasoning_effort=os.getenv("COPILOT_CLI_REASONING_EFFORT", "").strip() or None,
         copilot_cli_forward_reasoning=_parse_bool(os.getenv("COPILOT_CLI_FORWARD_REASONING"), True),
+        log_file_path=log_file_path,
+        log_level=(os.getenv("LOG_LEVEL", "INFO").strip() or "INFO").upper(),
+        console_log_level=(os.getenv("CONSOLE_LOG_LEVEL", "INFO").strip() or "INFO").upper(),
+        httpx_log_level=(os.getenv("HTTPX_LOG_LEVEL", "WARNING").strip() or "WARNING").upper(),
     )

@@ -3,6 +3,7 @@ from __future__ import annotations
 """
 
 import json
+import logging
 import re
 import shutil
 from collections.abc import Awaitable, Callable
@@ -19,6 +20,8 @@ URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 
 ProgressLogger = Callable[[str], Awaitable[None]]
 ReplyStreamer = Callable[[str], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -119,6 +122,7 @@ class AssistantPlanner:
             stderr=asyncio.subprocess.PIPE,
             cwd=self._settings.workspace_root.as_posix(),
         )
+        logger.info("Copilot CLI 启动 session=%s model=%s", session_id, self._settings.copilot_cli_model)
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
 
@@ -151,16 +155,21 @@ class AssistantPlanner:
         except TimeoutError as exc:
             process.kill()
             await process.wait()
+            logger.error("Copilot CLI 超时 session=%s timeout=%ss", session_id, self._settings.copilot_cli_timeout_seconds)
             raise RuntimeError("Copilot CLI 超时") from exc
 
         out_text = "\n".join(stdout_lines).strip()
         err_text = "\n".join(stderr_lines).strip()
         if process.returncode != 0:
+            logger.error("Copilot CLI 返回非零 code=%s session=%s", process.returncode, session_id)
             raise RuntimeError(err_text or out_text or f"Copilot CLI exited with {process.returncode}")
         if not out_text and err_text:
             out_text = err_text
         if not out_text:
+            logger.error("Copilot CLI 返回空结果 session=%s", session_id)
             raise RuntimeError("Copilot CLI 返回空结果")
+
+        logger.info("Copilot CLI 调用完成 session=%s", session_id)
 
         return self._parse_copilot_response(out_text)
 

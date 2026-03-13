@@ -5,6 +5,7 @@ from __future__ import annotations
 """
 
 import asyncio
+import logging
 import time
 from collections.abc import Awaitable, Callable
 
@@ -16,6 +17,8 @@ from copilot_in_telegram.config import Settings
 from copilot_in_telegram.task_runner import TaskRunner
 
 Handler = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 
 def _is_allowed(settings: Settings, chat_id: int | None) -> bool:
@@ -34,6 +37,7 @@ def restricted(settings: Settings, handler: Handler) -> Handler:
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id if update.effective_chat else None
         if not _is_allowed(settings, chat_id):
+            logger.warning("未授权访问 chat_id=%s", chat_id)
             if update.effective_message:
                 await update.effective_message.reply_text("当前用户未授权。请使用 /whoami 获取 chat id，再把将其加入到 TELEGRAM_ALLOWED_CHAT_IDS中")
             return
@@ -286,6 +290,7 @@ def build_application(settings: Settings) -> Application:
     async def on_startup(app: Application) -> None:
         await runner.start()
         app.bot_data["runner"] = runner
+        logger.info("Telegram application 启动完成")
 
     async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(
@@ -360,6 +365,7 @@ def build_application(settings: Settings) -> Application:
     async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat or not update.effective_message.text:
             return
+        logger.info("收到文本消息 chat_id=%s", update.effective_chat.id)
         await runner.submit(update.effective_chat.id, update.effective_message.text)
 
     builder = ApplicationBuilder().token(settings.telegram_bot_token)
