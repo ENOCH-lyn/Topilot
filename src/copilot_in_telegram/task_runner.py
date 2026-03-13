@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from asyncio.subprocess import Process
 from collections.abc import Awaitable, Callable
-from typing import TypeAlias
+from typing import Protocol, TypeAlias
 
 from copilot_in_telegram.agent import AssistantPlanner
 from copilot_in_telegram.config import Settings
@@ -15,6 +15,17 @@ from copilot_in_telegram.store import TaskStore
 
 ButtonList: TypeAlias = list[tuple[str, str]]
 SendMessage = Callable[[int, str, ButtonList | None], Awaitable[None]]
+
+
+class LiveProgress(Protocol):
+    async def log(self, text: str) -> None: ...
+
+    async def reply(self, text: str) -> None: ...
+
+    async def close(self, final_text: str | None = None, failed: bool = False) -> None: ...
+
+
+OpenLiveProgress = Callable[[int, str], Awaitable[LiveProgress]]
 
 
 class CommandExecutionError(RuntimeError):
@@ -98,9 +109,10 @@ async def open_and_describe(url: str) -> str:
 
 
 class TaskRunner:
-    def __init__(self, settings: Settings, send_message: SendMessage) -> None:
+    def __init__(self, settings: Settings, send_message: SendMessage, open_live_progress: OpenLiveProgress | None = None) -> None:
         self._settings = settings
         self._send_message = send_message
+        self._open_live_progress = open_live_progress
         self._store = TaskStore(settings.task_db_path)
         self._conversation = ConversationStore(settings.chat_db_path)
         self._sessions = SessionStore(settings.session_db_path)
@@ -118,15 +130,31 @@ class TaskRunner:
         history = self._conversation.recent(chat_id)
         active_session_id = self._sessions.ensure_active_session(chat_id)
         self._sessions.touch(chat_id, active_session_id)
-        plan = await self._planner.plan(active_session_id, history, instruction)
+        live_progress = await self._start_live_progress(chat_id, instruction)
+        try:
+            plan = await self._planner.plan(
+                active_session_id,
+                history,
+                instruction,
+                progress_logger=live_progress.log if live_progress else None,
+                reply_streamer=live_progress.reply if live_progress else None,
+            )
+        except Exception:
+            if live_progress:
+                await live_progress.close(failed=True)
+            raise
         self._conversation.append_turn(chat_id, "user", instruction)
 
         if plan.action_type is ActionType.RESPOND_ONLY:
             if plan.reasoning_message and self._settings.copilot_cli_forward_reasoning:
-                await self._send_message(chat_id, f"[思考过程]\n{plan.reasoning_message}")
+                if live_progress is None:
+                    await self._send_message(chat_id, f"[思考过程]\n{plan.reasoning_message}")
             reply = plan.assistant_message or self._planner.fallback_response()
             self._conversation.append_turn(chat_id, "assistant", reply)
-            await self._send_message(chat_id, reply)
+            if live_progress:
+                await live_progress.close(final_text=reply)
+            else:
+                await self._send_message(chat_id, reply)
             return TaskRecord(
                 chat_id=chat_id,
                 instruction=instruction,
@@ -134,6 +162,9 @@ class TaskRunner:
                 summary=plan.summary,
                 result_summary=reply,
             )
+
+        if live_progress:
+            await live_progress.close(final_text=plan.summary or "已转入任务执行阶段")
 
         task = TaskRecord(chat_id=chat_id, instruction=instruction)
         task.summary = plan.summary
@@ -153,6 +184,14 @@ class TaskRunner:
         self._store.upsert(task)
         await self._queue.put(task.id)
         return task
+
+    async def _start_live_progress(self, chat_id: int, instruction: str) -> LiveProgress | None:
+        if self._open_live_progress is None or not self._settings.copilot_cli_enabled:
+            return None
+        title = instruction.strip() or "Copilot 请求"
+        if len(title) > 80:
+            title = title[:80] + "..."
+        return await self._open_live_progress(chat_id, title)
 
     async def approve(self, chat_id: int, task_id: str) -> str:
         task = self._require_chat_task(chat_id, task_id)

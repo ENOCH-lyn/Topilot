@@ -83,7 +83,7 @@ def load_settings() -> Settings:
         copilot_cli_timeout_seconds=int(os.getenv("COPILOT_CLI_TIMEOUT_SECONDS", "120")),
         copilot_cli_allow_all_tools=_parse_bool(os.getenv("COPILOT_CLI_ALLOW_ALL_TOOLS"), True),
         copilot_cli_add_workspace_dir=_parse_bool(os.getenv("COPILOT_CLI_ADD_WORKSPACE_DIR"), True),
-        copilot_cli_reasoning_effort=os.getenv("COPILOT_CLI_REASONING_EFFORT", "medium").strip() or "medium",
+        copilot_cli_reasoning_effort=os.getenv("COPILOT_CLI_REASONING_EFFORT").strip() or None,
         copilot_cli_history_turns=int(os.getenv("COPILOT_CLI_HISTORY_TURNS", "20")),
         copilot_cli_forward_reasoning=_parse_bool(os.getenv("COPILOT_CLI_FORWARD_REASONING"), True),
         copilot_cli_reasoning_max_chars=int(os.getenv("COPILOT_CLI_REASONING_MAX_CHARS", "0")),
