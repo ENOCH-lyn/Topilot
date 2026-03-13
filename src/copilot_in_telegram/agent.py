@@ -69,9 +69,8 @@ class AssistantPlanner:
     def fallback_response(self) -> str:
         reason = self.llm_status_text()
         return (
-            "我现在会把 Telegram 消息转给 Copilot CLI。\n"
             f"当前后端状态: {reason}\n"
-            "如果你看到这个提示，说明 Copilot CLI 当前不可用，请先在本机终端执行 `copilot login`。"
+            "Copilot CLI 当前不可用"
         )
 
     def llm_status_text(self) -> str:
@@ -79,8 +78,6 @@ class AssistantPlanner:
             return f"Copilot CLI 已启用（model={self._settings.copilot_cli_model}）"
 
         copilot_reasons: list[str] = []
-        if not self._settings.copilot_cli_enabled:
-            copilot_reasons.append("COPILOT_CLI_ENABLED=false")
         if not self._settings.copilot_cli_command:
             copilot_reasons.append("COPILOT_CLI_COMMAND 为空")
 
@@ -89,7 +86,7 @@ class AssistantPlanner:
         return "Copilot CLI 未就绪"
 
     def _copilot_cli_ready(self) -> bool:
-        return bool(self._settings.copilot_cli_enabled and self._settings.copilot_cli_command)
+        return bool(self._settings.copilot_cli_command)
 
     async def _plan_with_copilot_cli(
         self,
@@ -108,6 +105,7 @@ class AssistantPlanner:
             *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=self._settings.workspace_root.as_posix(),
         )
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
