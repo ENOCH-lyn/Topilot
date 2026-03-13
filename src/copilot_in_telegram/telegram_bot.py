@@ -4,9 +4,9 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import Message, Update
 from telegram.error import BadRequest
-from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 from copilot_in_telegram.config import Settings
 from copilot_in_telegram.task_runner import TaskRunner
@@ -252,16 +252,11 @@ def build_application(settings: Settings) -> Application:
             except asyncio.CancelledError:
                 pass
 
-    async def send_message(chat_id: int, text: str, buttons: list[tuple[str, str]] | None = None) -> None:
+    async def send_message(chat_id: int, text: str) -> None:
         if application is None:
             return
-        reply_markup = None
-        if buttons:
-            keyboard = [[InlineKeyboardButton(label, callback_data=data)] for label, data in buttons]
-            reply_markup = InlineKeyboardMarkup(keyboard)
         for chunk in _chunk_text(text):
-            await application.bot.send_message(chat_id=chat_id, text=chunk, reply_markup=reply_markup)
-            reply_markup = None
+            await application.bot.send_message(chat_id=chat_id, text=chunk)
 
     async def open_live_progress(chat_id: int, title: str) -> TelegramLiveProgress:
         progress = TelegramLiveProgress(chat_id, title)
@@ -286,9 +281,6 @@ def build_application(settings: Settings) -> Application:
             "/status\n"
             "/history\n"
             "/reset\n"
-            "/interrupt [task_id]\n"
-            "/approve <task_id>\n"
-            "/deny <task_id>\n"
             "也可直接发送文本"
         )
 
@@ -366,67 +358,6 @@ def build_application(settings: Settings) -> Application:
             return
         await update.effective_message.reply_text(runner.reset_text(update.effective_chat.id))
 
-    async def approve_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.effective_message or not update.effective_chat:
-            return
-        task_id = context.args[0].strip() if context.args else ""
-        if not task_id:
-            await update.effective_message.reply_text("请提供 task_id。")
-            return
-        try:
-            text = await runner.approve(update.effective_chat.id, task_id)
-        except ValueError as exc:
-            text = str(exc)
-        await update.effective_message.reply_text(text)
-
-    async def deny_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.effective_message or not update.effective_chat:
-            return
-        task_id = context.args[0].strip() if context.args else ""
-        if not task_id:
-            await update.effective_message.reply_text("请提供 task_id。")
-            return
-        try:
-            text = await runner.deny(update.effective_chat.id, task_id)
-        except ValueError as exc:
-            text = str(exc)
-        await update.effective_message.reply_text(text)
-
-    async def interrupt_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.effective_message or not update.effective_chat:
-            return
-        task_id = context.args[0].strip() if context.args else None
-        try:
-            text = await runner.interrupt(update.effective_chat.id, task_id)
-        except ValueError as exc:
-            text = str(exc)
-        await update.effective_message.reply_text(text)
-
-    async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.callback_query or not update.effective_chat:
-            return
-        query = update.callback_query
-        await query.answer()
-        payload = query.data or ""
-        action, _, task_id = payload.partition(":")
-        if not task_id:
-            await query.edit_message_text("按钮数据无效。")
-            return
-
-        try:
-            if action == "approve":
-                result = await runner.approve(update.effective_chat.id, task_id)
-            elif action == "deny":
-                result = await runner.deny(update.effective_chat.id, task_id)
-            elif action == "interrupt":
-                result = await runner.interrupt(update.effective_chat.id, task_id)
-            else:
-                result = "未知动作。"
-        except ValueError as exc:
-            result = str(exc)
-        await query.edit_message_reply_markup(reply_markup=None)
-        await query.message.reply_text(result)
-
     async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat or not update.effective_message.text:
             return
@@ -450,10 +381,6 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("status", restricted(settings, status_command)))
     application.add_handler(CommandHandler("history", restricted(settings, history_command)))
     application.add_handler(CommandHandler("reset", restricted(settings, reset_command)))
-    application.add_handler(CommandHandler("interrupt", restricted(settings, interrupt_command)))
-    application.add_handler(CommandHandler("approve", restricted(settings, approve_command)))
-    application.add_handler(CommandHandler("deny", restricted(settings, deny_command)))
-    application.add_handler(CallbackQueryHandler(restricted(settings, approval_callback), pattern=r"^(approve|deny|interrupt):"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, restricted(settings, text_message)))
 
     return application

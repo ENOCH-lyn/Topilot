@@ -56,14 +56,12 @@ class AssistantPlanner:
                         f"错误: {str(exc)[:200]}\n"
                         "先在终端执行 `copilot login`，然后用 /llm 检查状态。"
                     ),
-                    requires_approval=False,
                 )
 
         return PlannedAction(
             action_type=ActionType.RESPOND_ONLY,
             summary="未启用 Copilot CLI，使用本地规则",
             assistant_message=self.fallback_response(),
-            requires_approval=False,
         )
 
     def fallback_response(self) -> str:
@@ -192,7 +190,6 @@ class AssistantPlanner:
             summary="Copilot 对话回复",
             assistant_message=text,
             reasoning_message=reasoning,
-            requires_approval=False,
         )
 
     def _stream_events_from_item(self, item: dict[str, object]) -> list[StreamEvent]:
