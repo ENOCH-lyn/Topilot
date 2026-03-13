@@ -1,4 +1,8 @@
 from __future__ import annotations
+"""Telegram 机器人接入层
+
+负责命令路由、权限校验、消息发送与流式消息更新
+"""
 
 import asyncio
 import time
@@ -15,6 +19,8 @@ Handler = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
 
 
 def _is_allowed(settings: Settings, chat_id: int | None) -> bool:
+    """判断当前 chat 是否在允许名单中"""
+
     if chat_id is None:
         return False
     if not settings.allowed_chat_ids:
@@ -23,6 +29,8 @@ def _is_allowed(settings: Settings, chat_id: int | None) -> bool:
 
 
 def restricted(settings: Settings, handler: Handler) -> Handler:
+    """为处理器添加 chat 白名单校验"""
+
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = update.effective_chat.id if update.effective_chat else None
         if not _is_allowed(settings, chat_id):
@@ -35,9 +43,13 @@ def restricted(settings: Settings, handler: Handler) -> Handler:
 
 
 def build_application(settings: Settings) -> Application:
+    """构建并返回 Telegram Application 实例"""
+
     application: Application | None = None
 
     class TelegramLiveProgress:
+        """Telegram 端流式展示实现"""
+
         def __init__(self, chat_id: int, title: str) -> None:
             self._chat_id = chat_id
             self._title = title
@@ -54,9 +66,13 @@ def build_application(settings: Settings) -> Application:
             self._closed = False
 
         async def start(self) -> "TelegramLiveProgress":
+            """启动流式对象"""
+
             return self
 
         async def log(self, text: str) -> None:
+            """接收并渲染过程日志"""
+
             normalized = text.strip()
             if not normalized or self._closed:
                 return
@@ -69,6 +85,8 @@ def build_application(settings: Settings) -> Application:
             self._ensure_progress_flush_task()
 
         async def reply(self, text: str) -> None:
+            """接收并渲染流式回复内容"""
+
             normalized = text.strip()
             if not normalized or self._closed:
                 return
@@ -79,6 +97,8 @@ def build_application(settings: Settings) -> Application:
             self._ensure_reply_flush_task()
 
         async def close(self, final_text: str | None = None, failed: bool = False) -> None:
+            """结束流式会话并刷新最终显示"""
+
             if self._closed:
                 return
             self._closed = True
@@ -269,7 +289,7 @@ def build_application(settings: Settings) -> Application:
 
     async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(
-            "可用命令:\n"
+            "可用命令（Copilot 对话模式）:\n"
             "/whoami\n"
             "/llm\n"
             "/session_current\n"
@@ -282,7 +302,7 @@ def build_application(settings: Settings) -> Application:
 
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(
-            "可用命令:\n"
+            "帮助信息（Copilot 对话模式）:\n"
             "/whoami\n"
             "/llm\n"
             "/session_current\n"
@@ -363,6 +383,8 @@ def build_application(settings: Settings) -> Application:
 
 
 def _chunk_text(text: str, limit: int = 3500) -> list[str]:
+    """按 Telegram 消息长度上限切分文本"""
+
     if len(text) <= limit:
         return [text]
     chunks: list[str] = []

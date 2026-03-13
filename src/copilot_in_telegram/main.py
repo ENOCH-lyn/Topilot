@@ -1,4 +1,5 @@
 from __future__ import annotations
+"""程序入口模块"""
 
 import os
 
@@ -7,6 +8,8 @@ from copilot_in_telegram.telegram_bot import build_application
 
 
 def main() -> None:
+    """加载配置并启动 Telegram 轮询"""
+
     try:
         settings = load_settings()
     except ConfigurationError as exc:

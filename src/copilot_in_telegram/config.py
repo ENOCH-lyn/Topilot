@@ -1,4 +1,6 @@
 from __future__ import annotations
+"""项目配置加载模块
+"""
 
 import os
 from dataclasses import dataclass
@@ -9,6 +11,8 @@ from dotenv import load_dotenv
 
 @dataclass(slots=True)
 class Settings:
+    """应用运行配置"""
+
     telegram_bot_token: str
     allowed_chat_ids: set[int]
     workspace_root: Path
@@ -25,16 +29,22 @@ class Settings:
 
 
 class ConfigurationError(RuntimeError):
+    """配置缺失或非法时抛出的异常"""
+
     pass
 
 
 def _parse_bool(value: str | None, default: bool) -> bool:
+    """将字符串环境变量解析为布尔值"""
+
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _parse_chat_ids(value: str | None) -> set[int]:
+    """解析 Telegram Chat ID 列表"""
+
     if not value:
         return set()
     result: set[int] = set()
@@ -47,6 +57,8 @@ def _parse_chat_ids(value: str | None) -> set[int]:
 
 
 def load_settings() -> Settings:
+    """加载并返回应用配置"""
+
     load_dotenv()
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
@@ -65,8 +77,8 @@ def load_settings() -> Settings:
         chat_db_path=chat_db_path,
         session_db_path=session_db_path,
         telegram_proxy_url=os.getenv("TELEGRAM_PROXY_URL", "").strip() or None,
-        copilot_cli_command=os.getenv("COPILOT_CLI_COMMAND").strip() or "copilot",
-        copilot_cli_model=os.getenv("COPILOT_CLI_MODEL").strip() or "gpt-4.1",
+        copilot_cli_command=os.getenv("COPILOT_CLI_COMMAND", "copilot").strip() or "copilot",
+        copilot_cli_model=os.getenv("COPILOT_CLI_MODEL", "gpt-4.1").strip() or "gpt-4.1",
         copilot_cli_timeout_seconds=int(os.getenv("COPILOT_CLI_TIMEOUT_SECONDS", "3600")),
         copilot_cli_allow_all_tools=_parse_bool(os.getenv("COPILOT_CLI_ALLOW_ALL_TOOLS"), True),
         copilot_cli_add_workspace_dir=_parse_bool(os.getenv("COPILOT_CLI_ADD_WORKSPACE_DIR"), True),

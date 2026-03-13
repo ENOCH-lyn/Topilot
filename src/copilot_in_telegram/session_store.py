@@ -1,4 +1,5 @@
 from __future__ import annotations
+"""Copilot 会话持久化模块"""
 
 import json
 from datetime import datetime, timezone
@@ -7,10 +8,14 @@ from uuid import uuid4
 
 
 def _now_iso() -> str:
+    """返回当前 UTC 时间（ISO8601）"""
+
     return datetime.now(timezone.utc).isoformat()
 
 
 class SessionStore:
+    """管理每个 Telegram chat 对应的 Copilot 会话列表与当前会话"""
+
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
         self._payload: dict[str, dict] = {"active": {}, "sessions": {}}
@@ -35,6 +40,8 @@ class SessionStore:
         self._payload = payload
 
     def save(self) -> None:
+        """写回 JSON 文件"""
+
         self._db_path.write_text(json.dumps(self._payload, ensure_ascii=True, indent=2), encoding="utf-8")
 
     def _chat_key(self, chat_id: int) -> str:
@@ -49,6 +56,8 @@ class SessionStore:
         return sessions
 
     def ensure_active_session(self, chat_id: int) -> str:
+        """确保 chat 存在可用会话，不存在则自动创建"""
+
         active = self.active_session(chat_id)
         if active:
             self.touch(chat_id, active)
@@ -64,6 +73,8 @@ class SessionStore:
         return None
 
     def create_session(self, chat_id: int, title: str | None = None) -> str:
+        """创建新会话并设置为当前激活会话"""
+
         session_id = str(uuid4())
         entry = {
             "id": session_id,
@@ -78,11 +89,15 @@ class SessionStore:
         return session_id
 
     def list_sessions(self, chat_id: int, limit: int = 20) -> list[dict]:
+        """按最近使用时间排序返回会话列表"""
+
         sessions = list(self._chat_sessions(chat_id))
         sessions.sort(key=lambda item: item.get("last_used_at", ""), reverse=True)
         return sessions[:limit]
 
     def set_active(self, chat_id: int, session_id_prefix: str) -> str | None:
+        """根据会话 ID 前缀切换当前会话"""
+
         needle = session_id_prefix.strip().lower()
         if not needle:
             return None
@@ -96,6 +111,8 @@ class SessionStore:
         return None
 
     def touch(self, chat_id: int, session_id: str) -> None:
+        """更新会话最近使用时间"""
+
         changed = False
         for item in self._chat_sessions(chat_id):
             if item.get("id") == session_id:

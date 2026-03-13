@@ -1,4 +1,5 @@
 from __future__ import annotations
+"""对话历史存储模块"""
 
 import json
 from pathlib import Path
@@ -7,6 +8,8 @@ from copilot_in_telegram.models import ChatTurn
 
 
 class ConversationStore:
+    """按 chat 维度管理对话历史"""
+
     def __init__(self, db_path: Path, max_turns_per_chat: int = 40) -> None:
         self._db_path = db_path
         self._max_turns_per_chat = max_turns_per_chat
@@ -35,6 +38,8 @@ class ConversationStore:
         }
 
     def save(self) -> None:
+        """将当前内存状态持久化到 JSON 文件"""
+
         payload = {
             chat_id: [turn.to_dict() for turn in turns]
             for chat_id, turns in self._conversations.items()
@@ -42,6 +47,8 @@ class ConversationStore:
         self._db_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
 
     def append_turn(self, chat_id: int, role: str, content: str) -> None:
+        """追加单条对话，并在超过上限时裁剪旧消息"""
+
         key = str(chat_id)
         turns = self._conversations.setdefault(key, [])
         turns.append(ChatTurn(role=role, content=content))
@@ -50,9 +57,13 @@ class ConversationStore:
         self.save()
 
     def recent(self, chat_id: int, limit: int = 12) -> list[ChatTurn]:
+        """获取最近 N 条对话"""
+
         turns = self._conversations.get(str(chat_id), [])
         return turns[-limit:]
 
     def reset_chat(self, chat_id: int) -> None:
+        """清空指定 chat 的历史记录"""
+
         self._conversations.pop(str(chat_id), None)
         self.save()

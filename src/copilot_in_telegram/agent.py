@@ -1,4 +1,6 @@
 from __future__ import annotations
+"""Copilot CLI 调用与事件解析模块
+"""
 
 import json
 import re
@@ -21,12 +23,16 @@ ReplyStreamer = Callable[[str], Awaitable[None]]
 
 @dataclass(slots=True)
 class StreamEvent:
+    """流式事件统一结构"""
+
     kind: str
     text: str
     event_type: str
 
 
 class AssistantPlanner:
+    """将用户输入转换为 Copilot CLI 可执行计划"""
+
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
@@ -38,6 +44,8 @@ class AssistantPlanner:
         progress_logger: ProgressLogger | None = None,
         reply_streamer: ReplyStreamer | None = None,
     ) -> PlannedAction:
+        """执行一次 Copilot 规划流程"""
+
         if self._copilot_cli_ready():
             try:
                 return await self._plan_with_copilot_cli(
@@ -52,7 +60,7 @@ class AssistantPlanner:
                     action_type=ActionType.RESPOND_ONLY,
                     summary="Copilot CLI 调用失败",
                     assistant_message=(
-                        "Copilot CLI 当前调用失败。\n"
+                        "Copilot CLI 当前调用失败\n"
                         f"错误: {str(exc)[:200]}\n"
                         "请检查 copilot 登录状态与命令配置，然后重试"
                     ),
@@ -65,6 +73,8 @@ class AssistantPlanner:
         )
 
     def fallback_response(self) -> str:
+        """构造 Copilot CLI 不可用时的统一提示"""
+
         reason = self.llm_status_text()
         return (
             f"当前后端状态: {reason}\n"
@@ -72,6 +82,8 @@ class AssistantPlanner:
         )
 
     def llm_status_text(self) -> str:
+        """返回当前 Copilot CLI 状态文本"""
+
         if self._copilot_cli_ready():
             return f"Copilot CLI 已启用（model={self._settings.copilot_cli_model}）"
 
@@ -94,6 +106,8 @@ class AssistantPlanner:
         progress_logger: ProgressLogger | None = None,
         reply_streamer: ReplyStreamer | None = None,
     ) -> PlannedAction:
+        """调用 Copilot CLI 并实时消费 JSONL 输出"""
+
         prompt = self._build_copilot_prompt(history, instruction)
         argv = self._build_copilot_argv(prompt, session_id)
         if self._settings.copilot_cli_allow_all_tools:
@@ -146,7 +160,7 @@ class AssistantPlanner:
         if not out_text and err_text:
             out_text = err_text
         if not out_text:
-            raise RuntimeError("Copilot CLI 返回空结果。")
+            raise RuntimeError("Copilot CLI 返回空结果")
 
         return self._parse_copilot_response(out_text)
 
@@ -156,6 +170,8 @@ class AssistantPlanner:
         progress_logger: ProgressLogger | None,
         reply_streamer: ReplyStreamer | None,
     ) -> None:
+        """解析单行 JSON 并分发为日志/回复事件"""
+
         stripped = line.strip()
         if not stripped:
             return
@@ -173,9 +189,13 @@ class AssistantPlanner:
                 await progress_logger(event.text)
 
     def _build_copilot_prompt(self, history: list[ChatTurn], instruction: str) -> str:
+        """构造发送给 Copilot CLI 的 prompt"""
+
         return instruction.strip()
 
     def _parse_copilot_response(self, raw_content: str) -> PlannedAction:
+        """从 CLI 原始输出中提取最终回复"""
+
         final_reply, reasoning = self._extract_copilot_jsonl_parts(raw_content)
         text = (final_reply or raw_content).strip()
         if not text:
