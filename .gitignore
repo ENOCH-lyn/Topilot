@@ -28,3 +28,7 @@ data/*.json
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Local Tips
+Copilot-help-info.txt
+Tips.md
