@@ -276,10 +276,7 @@ def build_application(settings: Settings) -> Application:
             "/sessions\n"
             "/session_new [title]\n"
             "/session_use <session_id前缀>\n"
-            "/run <指令>\n"
             "/status\n"
-            "/history\n"
-            "/reset\n"
             "也可直接发送文本"
         )
 
@@ -292,10 +289,7 @@ def build_application(settings: Settings) -> Application:
             "/sessions\n"
             "/session_new [title]\n"
             "/session_use <session_id前缀>\n"
-            "/run <指令>\n"
             "/status\n"
-            "/history\n"
-            "/reset\n"
             "也可直接发送文本"
         )
 
@@ -343,16 +337,6 @@ def build_application(settings: Settings) -> Application:
             return
         await update.effective_message.reply_text(runner.status_text(update.effective_chat.id))
 
-    async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.effective_message or not update.effective_chat:
-            return
-        await update.effective_message.reply_text(runner.history_text(update.effective_chat.id))
-
-    async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.effective_message or not update.effective_chat:
-            return
-        await update.effective_message.reply_text(runner.reset_text(update.effective_chat.id))
-
     async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat or not update.effective_message.text:
             return
@@ -373,8 +357,6 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("start", restricted(settings, start_command)))
     application.add_handler(CommandHandler("help", restricted(settings, help_command)))
     application.add_handler(CommandHandler("status", restricted(settings, status_command)))
-    application.add_handler(CommandHandler("history", restricted(settings, history_command)))
-    application.add_handler(CommandHandler("reset", restricted(settings, reset_command)))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, restricted(settings, text_message)))
 
     return application
