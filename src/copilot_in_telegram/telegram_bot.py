@@ -36,7 +36,7 @@ def restricted(settings: Settings, handler: Handler) -> Handler:
         if not _is_allowed(settings, chat_id):
             logger.warning("未授权访问 chat_id=%s", chat_id)
             if update.effective_message:
-                await update.effective_message.reply_text("当前用户未授权。请使用 /whoami 获取 chat id，再把将其加入到 TELEGRAM_ALLOWED_CHAT_IDS中")
+                await update.effective_message.reply_text("当前用户未授权，请使用 /whoami 获取 chat id，并写入配置项 telegram.allowed_chat_ids")
             return
         await handler(update, context)
 

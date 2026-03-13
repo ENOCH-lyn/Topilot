@@ -1,0 +1,33 @@
+{
+  "telegram": {
+    "bot_token": "",
+    "allowed_chat_ids": [
+      123456789
+    ],
+    "proxy_url": null
+  },
+  "copilot": {
+    "cli_command": "copilot",
+    "model": "gpt-4.1",
+    "available_models": [],
+    "timeout_seconds": 3600,
+    "allow_all_tools": true,
+    "add_workspace_dir": true,
+    "reasoning_effort": null,
+    "forward_reasoning": true
+  },
+  "runtime": {
+    "workspace_root": "~/.copilot-in-telegram/workspace",
+    "session_watch_interval_seconds": 2.0
+  },
+  "storage": {
+    "chat_db_path": "~/.copilot-in-telegram/data/chats.json",
+    "session_db_path": "~/.copilot-in-telegram/data/sessions.json",
+    "log_file_path": "~/.copilot-in-telegram/logs/app.log"
+  },
+  "logging": {
+    "log_level": "INFO",
+    "console_log_level": "INFO",
+    "httpx_log_level": "WARNING"
+  }
+}

@@ -85,7 +85,7 @@ class AssistantPlanner:
         reason = self.llm_status_text()
         return (
             f"当前后端状态: {reason}\n"
-            "Copilot CLI 当前不可用，请确认Copilot CLI已正确安装并登录，COPILOT_CLI_COMMAND已正确配置"
+            "Copilot CLI 当前不可用，请确认 copilot 已登录，配置项 copilot.cli_command 正确"
         )
 
     def llm_status_text(self, model: str | None = None) -> str:
@@ -97,7 +97,7 @@ class AssistantPlanner:
 
         copilot_reasons: list[str] = []
         if not self._settings.copilot_cli_command:
-            copilot_reasons.append("COPILOT_CLI_COMMAND 为空")
+            copilot_reasons.append("copilot.cli_command 为空")
 
         if copilot_reasons:
             return "Copilot 未启用(" + "; ".join(copilot_reasons) + ")"
@@ -490,8 +490,9 @@ class AssistantPlanner:
 
     def _resolve_copilot_command(self) -> str:
         configured = self._settings.copilot_cli_command.strip()
-        if configured and shutil.which(configured):
-            return configured
+        resolved = shutil.which(configured) if configured else None
+        if resolved:
+            return resolved
         if configured and ("/" in configured or "\\" in configured):
             return configured
 

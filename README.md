@@ -28,34 +28,52 @@ Openclaw等项目消耗Token速度普遍较快，但是很多功能在日常生�
 
 ## 安装与启动
 
-> TODO:待修改启动方式
->
-> 例如打包成exe或使用pip进行安装
-
 ```powershell
 pip install -e .
-Copy-Item .env.example .env
 copilot login
-python -m copilot_in_telegram.main
+copilot-in-telegram
+```
+
+首次运行会自动进入交互式配置向导，生成 `~/.copilot-in-telegram/config.json`
+
+也可以手动执行
+
+```powershell
+copilot-in-telegram init
+copilot-in-telegram start
 ```
 
 ## 配置说明
 
-请参考 `.env.example`。常用配置如下：
+默认位置 `~/.copilot-in-telegram/config.json`
 
-- `TELEGRAM_BOT_TOKEN`：Telegram 机器人令牌（必填）
-- `TELEGRAM_ALLOWED_CHAT_IDS`：允许访问的 Chat ID 列表（强烈建议配置）
-- `WORKSPACE_ROOT`：Copilot CLI 的工作目录（`cwd`）
-- `COPILOT_CLI_COMMAND`：Copilot CLI 启动命令，默认 `copilot`
-- `COPILOT_CLI_MODEL`：默认选择的模型
-- `COPILOT_CLI_TIMEOUT_SECONDS`：单次 Copilot CLI 调用超时
-- `COPILOT_CLI_REASONING_EFFORT`：可选，Copilot模型思考深度
-- `COPILOT_MODELS`：可选，手动指定可用模型列表（逗号分隔），实时获取失败时可作为回退
-- `SESSION_WATCH_INTERVAL_SECONDS`：接管会话后历史对话内容自动追踪的轮询间隔秒数
-- `LOG_FILE_PATH`：日志文件路径（默认 `WORKSPACE_ROOT/logs/app.log`）
-- `LOG_LEVEL`：文件日志级别（默认 `INFO`）
-- `CONSOLE_LOG_LEVEL`：控制台日志级别（默认 `INFO`）
-- `HTTPX_LOG_LEVEL`：`httpx` 日志级别（默认 `WARNING`，避免 Telegram 轮询日志刷屏）
+目录结构
+
+```text
+~/.copilot-in-telegram/
+	config.json
+	data/
+		chats.json
+		sessions.json
+	logs/
+		app.log
+	workspace/
+```
+
+常用配置字段
+
+- `telegram.bot_token`：Telegram 机器人令牌（必填）
+- `telegram.allowed_chat_ids`：允许访问的 Chat ID 列表
+- `telegram.proxy_url`：Telegram 请求代理
+- `copilot.cli_command`：Copilot CLI 命令，默认 `copilot`
+- `copilot.model`：默认模型
+- `copilot.timeout_seconds`：单次调用超时秒数
+- `runtime.workspace_root`：默认工作区路径
+- `runtime.session_watch_interval_seconds`：接管会话轮询间隔
+- `storage.log_file_path`：日志文件路径
+- `logging.log_level`：文件日志级别
+- `logging.console_log_level`：控制台日志级别
+- `logging.httpx_log_level`：`httpx` 日志级别
 
 ## Bot 可用命令
 
@@ -69,3 +87,4 @@ python -m copilot_in_telegram.main
 - `/status`：查看运行状态
 - 直接发送文本将进入 Copilot 对话
 
+task_db_path
