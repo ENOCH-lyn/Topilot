@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+import os
+
+from copilot_in_telegram.config import ConfigurationError, load_settings
+from copilot_in_telegram.telegram_bot import build_application
+
+
+def main() -> None:
+    try:
+        settings = load_settings()
+    except ConfigurationError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    if settings.telegram_proxy_url:
+        os.environ.setdefault("HTTP_PROXY", settings.telegram_proxy_url)
+        os.environ.setdefault("HTTPS_PROXY", settings.telegram_proxy_url)
+        os.environ.setdefault("ALL_PROXY", settings.telegram_proxy_url)
+
+    application = build_application(settings)
+    application.run_polling()
+
+
+if __name__ == "__main__":
+    main()

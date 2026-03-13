@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "copilot-in-telegram"
+version = "0.0.1"
+description = "在Telegram Bot中使用Copilot Cli"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.27,<1",
+  "python-dotenv>=1.0,<2",
+  "python-telegram-bot>=22.6,<23"
+]
+
+[project.optional-dependencies]
+browser = [
+  "playwright>=1.51,<2"
+]
+
+[project.scripts]
+copilot-in-telegram = "copilot_in_telegram.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

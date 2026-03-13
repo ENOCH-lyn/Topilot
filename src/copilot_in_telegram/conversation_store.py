@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from copilot_in_telegram.models import ChatTurn
+
+
+class ConversationStore:
+    def __init__(self, db_path: Path, max_turns_per_chat: int = 40) -> None:
+        self._db_path = db_path
+        self._max_turns_per_chat = max_turns_per_chat
+        self._conversations: dict[str, list[ChatTurn]] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self._db_path.exists():
+            self._conversations = {}
+            return
+        raw_text = self._db_path.read_text(encoding="utf-8").strip()
+        if not raw_text:
+            self._conversations = {}
+            return
+        try:
+            payload = json.loads(raw_text)
+        except json.JSONDecodeError:
+            self._conversations = {}
+            return
+        if not isinstance(payload, dict):
+            self._conversations = {}
+            return
+        self._conversations = {
+            chat_id: [ChatTurn.from_dict(item) for item in turns]
+            for chat_id, turns in payload.items()
+        }
+
+    def save(self) -> None:
+        payload = {
+            chat_id: [turn.to_dict() for turn in turns]
+            for chat_id, turns in self._conversations.items()
+        }
+        self._db_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+
+    def append_turn(self, chat_id: int, role: str, content: str) -> None:
+        key = str(chat_id)
+        turns = self._conversations.setdefault(key, [])
+        turns.append(ChatTurn(role=role, content=content))
+        if len(turns) > self._max_turns_per_chat:
+            self._conversations[key] = turns[-self._max_turns_per_chat :]
+        self.save()
+
+    def recent(self, chat_id: int, limit: int = 12) -> list[ChatTurn]:
+        turns = self._conversations.get(str(chat_id), [])
+        return turns[-limit:]
+
+    def reset_chat(self, chat_id: int) -> None:
+        self._conversations.pop(str(chat_id), None)
+        self.save()
