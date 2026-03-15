@@ -11,8 +11,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.error import BadRequest
 from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from copilot_in_telegram.config import Settings
-from copilot_in_telegram.task_runner import TaskRunner
+from topilot.config import Settings
+from topilot.task_runner import TaskRunner
 
 Handler = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
 
@@ -414,7 +414,7 @@ def build_application(settings: Settings) -> Application:
 
     async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(
-            "可用命令（Copilot 对话模式）:\n"
+            "可用命令:\n"
             "/whoami\n"
             "/llm\n"
             "/session_current\n"
@@ -428,7 +428,7 @@ def build_application(settings: Settings) -> Application:
 
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(
-            "帮助信息（Copilot 对话模式）:\n"
+            "帮助信息:\n"
             "/whoami\n"
             "/llm\n"
             "/session_current\n"

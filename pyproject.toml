@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "copilot-in-telegram"
+name = "Topilot"
 version = "0.0.1"
 description = "在Telegram Bot中使用Copilot Cli"
 readme = "README.md"
@@ -14,8 +14,8 @@ dependencies = [
 ]
 
 [project.scripts]
-copilot-in-telegram = "copilot_in_telegram.cli.main:main"
-cit = "copilot_in_telegram.cli.main:main"
+topilot = "topilot.cli.main:main"
+cit = "topilot.cli.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

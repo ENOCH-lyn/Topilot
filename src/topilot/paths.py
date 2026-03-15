@@ -21,7 +21,7 @@ class AppPaths:
 def build_app_paths(home_dir: Path | None = None) -> AppPaths:
     """构建应用目录路径"""
 
-    root = (home_dir or Path.home() / ".copilot-in-telegram").expanduser().resolve()
+    root = (home_dir or Path.home() / ".topilot").expanduser().resolve()
     data_dir = root / "data"
     logs_dir = root / "logs"
     workspace_dir = root / "workspace"

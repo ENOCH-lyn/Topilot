@@ -17,13 +17,13 @@
     "forward_reasoning": true
   },
   "runtime": {
-    "workspace_root": "~/.copilot-in-telegram/workspace",
+    "workspace_root": "~/.topilot/workspace",
     "session_watch_interval_seconds": 2.0
   },
   "storage": {
-    "chat_db_path": "~/.copilot-in-telegram/data/chats.json",
-    "session_db_path": "~/.copilot-in-telegram/data/sessions.json",
-    "log_file_path": "~/.copilot-in-telegram/logs/app.log"
+    "chat_db_path": "~/.topilot/data/chats.json",
+    "session_db_path": "~/.topilot/data/sessions.json",
+    "log_file_path": "~/.topilot/logs/app.log"
   },
   "logging": {
     "log_level": "INFO",

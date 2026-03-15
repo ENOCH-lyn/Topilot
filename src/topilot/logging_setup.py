@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from logging.handlers import RotatingFileHandler
 
-from copilot_in_telegram.config import Settings
+from topilot.config import Settings
 
 
 def _to_level(level_name: str, fallback: int) -> int:

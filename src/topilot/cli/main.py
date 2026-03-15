@@ -4,7 +4,7 @@ import argparse
 import os
 from pathlib import Path
 
-from copilot_in_telegram.config import (
+from topilot.config import (
     ConfigurationError,
     default_config_payload,
     has_config,
@@ -13,9 +13,9 @@ from copilot_in_telegram.config import (
     payload_from_legacy_env,
     write_config,
 )
-from copilot_in_telegram.logging_setup import configure_logging
-from copilot_in_telegram.paths import build_app_paths, ensure_app_dirs
-from copilot_in_telegram.telegram_bot import build_application
+from topilot.logging_setup import configure_logging
+from topilot.paths import build_app_paths, ensure_app_dirs
+from topilot.telegram_bot import build_application
 
 
 def _prompt(prompt: str, default: str | None = None, required: bool = False) -> str:
@@ -46,7 +46,7 @@ def run_init(app_home: Path | None = None, force: bool = False) -> int:
 
     if paths.config_file.exists() and not force:
         print(f"配置已存在: {paths.config_file}")
-        print("如需覆盖请执行: copilot-in-telegram init --force")
+        print("如需覆盖请执行: topilot init --force")
         return 0
 
     print("首次配置向导")
@@ -56,7 +56,7 @@ def run_init(app_home: Path | None = None, force: bool = False) -> int:
     chat_ids = _prompt("允许访问的 Chat ID，多个用逗号分隔，留空表示全部允许", default="")
     proxy_url = _prompt("Telegram 代理 URL，可留空", default="")
     cli_command = _prompt("Copilot CLI 命令", default="copilot")
-    model = _prompt("默认模型", default="gpt-4.1")
+    model = _prompt("默认模型", default="gpt-5-mini")
     workspace = _prompt("默认工作区路径", default=paths.workspace_dir.as_posix())
     watch_interval = _prompt("会话追踪轮询间隔秒数", default="2")
     add_workspace = _prompt_bool("Copilot 命令自动附带 --add-dir", default=True)
@@ -104,12 +104,12 @@ def run_start(app_home: Path | None = None) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="copilot-in-telegram", description="Copilot in Telegram")
+    parser = argparse.ArgumentParser(prog="topilot", description="Copilot Cli in Telegram")
     parser.add_argument(
         "--home",
         dest="home",
         default=None,
-        help="应用目录，默认 ~/.copilot-in-telegram",
+        help="应用目录，默认 ~/.topilot",
     )
 
     sub = parser.add_subparsers(dest="command")
@@ -150,7 +150,7 @@ def main() -> None:
         ensure_app_dirs(paths)
         if paths.config_file.exists() and not bool(args.force):
             print(f"配置已存在: {paths.config_file}")
-            print("如需覆盖请使用: copilot-in-telegram import-env --force")
+            print("如需覆盖请使用: topilot import-env --force")
             raise SystemExit(1)
 
         env_path = Path(args.env).expanduser().resolve()

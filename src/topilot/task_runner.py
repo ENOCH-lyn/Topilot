@@ -5,11 +5,11 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from copilot_in_telegram.agent import AssistantPlanner
-from copilot_in_telegram.copilot_sessions import CopilotSessionInfo, CopilotSessionInspector
-from copilot_in_telegram.config import Settings
-from copilot_in_telegram.conversation_store import ConversationStore
-from copilot_in_telegram.session_store import SessionStore
+from topilot.agent import AssistantPlanner
+from topilot.copilot_sessions import CopilotSessionInfo, CopilotSessionInspector
+from topilot.config import Settings
+from topilot.conversation_store import ConversationStore
+from topilot.session_store import SessionStore
 
 SendMessage = Callable[[int, str], Awaitable[None]]
 

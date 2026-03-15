@@ -6,7 +6,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
-from copilot_in_telegram.paths import AppPaths, build_app_paths, ensure_app_dirs
+from topilot.paths import AppPaths, build_app_paths, ensure_app_dirs
 
 def _parse_models(value: str | None) -> list[str]:
     """解析内容为模型列表"""
@@ -151,7 +151,7 @@ def default_config_payload(paths: AppPaths) -> dict:
         },
         "copilot": {
             "cli_command": "copilot",
-            "model": "gpt-4.1",
+            "model": "gpt-5-mini",
             "available_models": [],
             "timeout_seconds": 3600,
             "allow_all_tools": True,
@@ -306,7 +306,7 @@ def load_settings(app_home: Path | None = None) -> Settings:
         session_db_path=session_db_path,
         telegram_proxy_url=(str(telegram.get("proxy_url") or "").strip() or None),
         copilot_cli_command=(str(copilot.get("cli_command") or "copilot").strip() or "copilot"),
-        copilot_cli_model=(str(copilot.get("model") or "gpt-4.1").strip() or "gpt-4.1"),
+        copilot_cli_model=(str(copilot.get("model") or "gpt-5-mini").strip() or "gpt-5-mini"),
         copilot_cli_timeout_seconds=_parse_int(copilot.get("timeout_seconds"), 3600),
         copilot_cli_allow_all_tools=_parse_bool(copilot.get("allow_all_tools"), True),
         copilot_cli_add_workspace_dir=_parse_bool(copilot.get("add_workspace_dir"), True),

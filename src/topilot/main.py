@@ -1,7 +1,7 @@
 from __future__ import annotations
 """兼容入口模块"""
 
-from copilot_in_telegram.cli.main import main as cli_main
+from topilot.cli.main import main as cli_main
 
 
 def main() -> None:

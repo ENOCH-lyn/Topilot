@@ -13,8 +13,8 @@ from pathlib import Path
 
 import asyncio
 
-from copilot_in_telegram.config import Settings
-from copilot_in_telegram.models import ActionType, ChatTurn, PlannedAction
+from topilot.config import Settings
+from topilot.models import ActionType, ChatTurn, PlannedAction
 
 URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 
