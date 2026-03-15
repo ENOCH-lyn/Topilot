@@ -4,7 +4,15 @@ import argparse
 import os
 from pathlib import Path
 
-from copilot_in_telegram.config import ConfigurationError, default_config_payload, has_config, load_settings, write_config
+from copilot_in_telegram.config import (
+    ConfigurationError,
+    default_config_payload,
+    has_config,
+    load_settings,
+    parse_legacy_env_file,
+    payload_from_legacy_env,
+    write_config,
+)
 from copilot_in_telegram.logging_setup import configure_logging
 from copilot_in_telegram.paths import build_app_paths, ensure_app_dirs
 from copilot_in_telegram.telegram_bot import build_application
@@ -112,6 +120,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("start", help="启动机器人")
     sub.add_parser("config-path", help="显示配置文件路径")
     sub.add_parser("doctor", help="检查运行前配置")
+    import_parser = sub.add_parser("import-env", help="从旧版 .env 迁移配置")
+    import_parser.add_argument("--env", default=".env", help="旧版 .env 路径，默认当前目录 .env")
+    import_parser.add_argument("--force", action="store_true", help="覆盖已存在 JSON 配置")
     return parser
 
 
@@ -132,6 +143,25 @@ def main() -> None:
         print(f"app_home={paths.home_dir}")
         print(f"config={paths.config_file}")
         print(f"has_config={has_config(app_home)}")
+        return
+
+    if args.command == "import-env":
+        paths = build_app_paths(app_home)
+        ensure_app_dirs(paths)
+        if paths.config_file.exists() and not bool(args.force):
+            print(f"配置已存在: {paths.config_file}")
+            print("如需覆盖请使用: copilot-in-telegram import-env --force")
+            raise SystemExit(1)
+
+        env_path = Path(args.env).expanduser().resolve()
+        values = parse_legacy_env_file(env_path)
+        if not values:
+            print(f"未读取到有效配置: {env_path}")
+            raise SystemExit(1)
+
+        payload = payload_from_legacy_env(paths, values)
+        write_config(payload, paths.config_file)
+        print(f"已迁移配置: {env_path} -> {paths.config_file}")
         return
 
     if not has_config(app_home):

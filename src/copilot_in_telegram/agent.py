@@ -460,6 +460,7 @@ class AssistantPlanner:
     ) -> list[str]:
         command = self._resolve_copilot_command()
         effective_model = model or self._settings.copilot_cli_model
+        safe_prompt = self._normalize_prompt_for_command(prompt, command)
         base_args = [
             "--resume",
             session_id,
@@ -468,7 +469,7 @@ class AssistantPlanner:
             "--output-format",
             "json",
             "-p",
-            prompt,
+            safe_prompt,
             "-s",
         ]
         if self._settings.copilot_cli_reasoning_effort:
@@ -528,6 +529,19 @@ class AssistantPlanner:
         if fallback_ps1.exists():
             return fallback_ps1.as_posix()
         return configured or "copilot"
+
+    def _normalize_prompt_for_command(self, prompt: str, command: str) -> str:
+        """根据命令类型规范化 prompt
+
+        - bat/cmd: 将真实换行转成字面 \n，避免 Windows cmd 参数截断
+        - 其他类型: 保持原样
+        """
+
+        suffix = Path(command).suffix.lower()
+        if suffix in {".bat", ".cmd"}:
+            normalized = prompt.replace("\r\n", "\n").replace("\r", "\n")
+            return normalized.replace("\n", r"\n")
+        return prompt
 
     def _extract_copilot_jsonl_parts(self, raw_content: str) -> tuple[str, str]:
         message_parts: list[str] = []
