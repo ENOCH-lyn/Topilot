@@ -33,6 +33,13 @@ class StreamEvent:
     event_type: str
 
 
+@dataclass(slots=True)
+class StreamState:
+    """单次流式输出解析状态"""
+
+    has_reply_delta_in_turn: bool = False
+
+
 class AssistantPlanner:
     """将用户输入转换为 Copilot CLI 可执行计划"""
 
@@ -166,6 +173,7 @@ class AssistantPlanner:
         logger.info("Copilot CLI 启动 session=%s model=%s cwd=%s", session_id, effective_model, effective_cwd)
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
+        stream_state = StreamState()
 
         async def consume_stdout() -> None:
             assert process.stdout is not None
@@ -175,7 +183,7 @@ class AssistantPlanner:
                     break
                 line = raw_line.decode(errors="replace").rstrip("\r\n")
                 stdout_lines.append(line)
-                await self._forward_stdout_line(line, progress_logger, reply_streamer)
+                await self._forward_stdout_line(line, progress_logger, reply_streamer, stream_state)
 
         async def consume_stderr() -> None:
             assert process.stderr is not None
@@ -219,6 +227,7 @@ class AssistantPlanner:
         line: str,
         progress_logger: ProgressLogger | None,
         reply_streamer: ReplyStreamer | None,
+        stream_state: StreamState,
     ) -> None:
         """解析单行 JSON 并分发为日志/回复事件"""
 
@@ -232,7 +241,7 @@ class AssistantPlanner:
         except JSONDecodeError:
             return
 
-        for event in self._stream_events_from_item(item):
+        for event in self._stream_events_from_item(item, stream_state):
             if event.kind == "reply" and reply_streamer:
                 await reply_streamer(event.text)
             elif event.kind == "log" and progress_logger:
@@ -259,9 +268,17 @@ class AssistantPlanner:
             reasoning_message=reasoning,
         )
 
-    def _stream_events_from_item(self, item: dict[str, object]) -> list[StreamEvent]:
+    def _stream_events_from_item(self, item: dict[str, object], stream_state: StreamState) -> list[StreamEvent]:
         item_type = str(item.get("type", "")).strip() or "unknown"
         data = item.get("data")
+
+        if item_type == "assistant.turn_start":
+            stream_state.has_reply_delta_in_turn = False
+            return []
+
+        if item_type == "assistant.turn_end":
+            stream_state.has_reply_delta_in_turn = False
+            return []
 
         if item_type in {"session.tools_updated", "user.message", "subagent.completed", "subagent.started"}:
             return []
@@ -269,15 +286,26 @@ class AssistantPlanner:
         if isinstance(data, dict) and self._is_noisy_payload(data):
             return []
 
+        if item_type == "assistant.reasoning_delta":
+            return []
+
         content = data.get("content") if isinstance(data, dict) else data
         text_parts = self._extract_text_parts(content)
         text = "\n".join(part for part in text_parts if part).strip()
 
         delta_text = self._extract_delta_text(data)
-        if delta_text:
+        if item_type == "assistant.message_delta":
+            if not delta_text:
+                return []
+            stream_state.has_reply_delta_in_turn = True
             return [StreamEvent(kind="reply", text=delta_text, event_type=item_type)]
 
+        if delta_text:
+            return []
+
         if item_type == "assistant.message":
+            if stream_state.has_reply_delta_in_turn:
+                return []
             return [StreamEvent(kind="reply", text=text, event_type=item_type)] if text else []
 
         if item_type == "assistant.reasoning":
@@ -544,8 +572,8 @@ class AssistantPlanner:
         return prompt
 
     def _extract_copilot_jsonl_parts(self, raw_content: str) -> tuple[str, str]:
-        message_parts: list[str] = []
-        reasoning_parts: list[str] = []
+        latest_message = ""
+        latest_reasoning = ""
         for line in raw_content.splitlines():
             stripped = line.strip()
             if not stripped.startswith("{"):
@@ -558,10 +586,14 @@ class AssistantPlanner:
             content = data.get("content") if isinstance(data, dict) else data
             content_parts = self._extract_text_parts(content)
             if item.get("type") == "assistant.reasoning":
-                reasoning_parts.extend(content_parts)
+                reasoning_text = "\n".join(content_parts).strip()
+                if reasoning_text:
+                    latest_reasoning = reasoning_text
             if item.get("type") == "assistant.message":
-                message_parts.extend(content_parts)
-        return "\n".join(message_parts).strip(), "\n".join(reasoning_parts).strip()
+                message_text = "\n".join(content_parts).strip()
+                if message_text:
+                    latest_message = message_text
+        return latest_message, latest_reasoning
 
     def _extract_text_parts(self, content: object) -> list[str]:
         if isinstance(content, str):

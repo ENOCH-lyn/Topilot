@@ -65,6 +65,7 @@ def build_application(settings: Settings) -> Application:
             self._reply_flush_task: asyncio.Task[None] | None = None
             self._last_reply_render = ""
             self._last_reply_edit_at = 0.0
+            self._reply_started = False
             self._closed = False
 
         async def start(self) -> "TelegramLiveProgress":
@@ -80,6 +81,8 @@ def build_application(settings: Settings) -> Application:
                 return
             if self._should_skip_log(normalized):
                 return
+            if self._reply_started:
+                await self._roll_to_next_round()
             merged = self._merge_progress_line(normalized)
             if merged and self._can_edit_progress_now():
                 await self._flush_progress(force=True)
@@ -92,6 +95,7 @@ def build_application(settings: Settings) -> Application:
             normalized = text.strip()
             if not normalized or self._closed:
                 return
+            self._reply_started = True
             self._append_reply_chunk(normalized)
             if self._can_edit_reply_now():
                 await self._flush_reply(force=True)
@@ -114,6 +118,25 @@ def build_application(settings: Settings) -> Application:
             await self._flush_reply(force=True)
             await self._cancel_task(self._progress_flush_task)
             await self._cancel_task(self._reply_flush_task)
+
+        async def _roll_to_next_round(self) -> None:
+            """当回复后再次出现过程事件时，切换到新的展示轮次"""
+
+            await self._flush_progress(force=True)
+            await self._flush_reply(force=True)
+            await self._cancel_task(self._progress_flush_task)
+            await self._cancel_task(self._reply_flush_task)
+            self._progress_flush_task = None
+            self._reply_flush_task = None
+            self._progress_message = None
+            self._reply_message = None
+            self._progress_lines = []
+            self._reply_buffer = ""
+            self._last_progress_render = ""
+            self._last_reply_render = ""
+            self._last_progress_edit_at = 0.0
+            self._last_reply_edit_at = 0.0
+            self._reply_started = False
 
         def _render_progress(self) -> str:
             state = "已完成" if self._closed else "进行中"
@@ -143,6 +166,10 @@ def build_application(settings: Settings) -> Application:
                 return
             if current.endswith(chunk):
                 return
+            overlap = self._suffix_prefix_overlap(current, chunk)
+            if overlap >= 6:
+                self._reply_buffer += chunk[overlap:]
+                return
             if self._looks_like_delta_chunk(chunk):
                 self._reply_buffer += chunk
                 return
@@ -150,6 +177,13 @@ def build_application(settings: Settings) -> Application:
             if current and not current.endswith("\n"):
                 self._reply_buffer += "\n"
             self._reply_buffer += chunk
+
+        def _suffix_prefix_overlap(self, left: str, right: str) -> int:
+            max_len = min(len(left), len(right))
+            for size in range(max_len, 0, -1):
+                if left.endswith(right[:size]):
+                    return size
+            return 0
 
         def _looks_like_delta_chunk(self, chunk: str) -> bool:
             if "\n" in chunk:
