@@ -7,7 +7,7 @@ import logging
 import re
 import shutil
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
 
@@ -38,6 +38,15 @@ class StreamState:
     """单次流式输出解析状态"""
 
     has_reply_delta_in_turn: bool = False
+    tool_calls: dict[str, "ToolCallContext"] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class ToolCallContext:
+    """工具调用上下文"""
+
+    tool_name: str
+    arguments: dict[str, object]
 
 
 class AssistantPlanner:
@@ -280,7 +289,15 @@ class AssistantPlanner:
             stream_state.has_reply_delta_in_turn = False
             return []
 
-        if item_type in {"session.tools_updated", "user.message", "subagent.completed", "subagent.started"}:
+        if item_type == "tool.execution_start":
+            summary = self._summarize_tool_start(data, stream_state)
+            return [StreamEvent(kind="log", text=summary, event_type=item_type)] if summary else []
+
+        if item_type == "tool.execution_complete":
+            summary = self._summarize_tool_complete(data, stream_state)
+            return [StreamEvent(kind="log", text=summary, event_type=item_type)] if summary else []
+
+        if item_type in {"session.tools_updated", "session.info", "user.message", "subagent.completed", "subagent.started"}:
             return []
 
         if isinstance(data, dict) and self._is_noisy_payload(data):
@@ -319,14 +336,11 @@ class AssistantPlanner:
 
     def _summarize_stream_item(self, item_type: str, data: object, text: str) -> str:
         if item_type.startswith("tool") or self._looks_like_tool_payload(data):
-            tool_line = self._summarize_tool_line(data)
-            if tool_line:
-                return tool_line
             fallback_tool_text = self._shorten_single_line(text or self._extract_tool_result_text(data), 160)
             if fallback_tool_text:
                 if "exited with error" in fallback_tool_text.lower() or "not available" in fallback_tool_text.lower():
                     return f"命令执行失败: {fallback_tool_text}"
-                return f"工具结果: {fallback_tool_text}"
+                return f"工具事件输出: {fallback_tool_text}"
 
         headline = self._pick_first_string(data, ["title", "label", "name", "toolName", "tool", "command", "path", "url"])
         detail = self._pick_first_string(
@@ -347,45 +361,313 @@ class AssistantPlanner:
 
         return rendered[:800] + ("..." if len(rendered) > 800 else "")
 
-    def _summarize_tool_line(self, data: object) -> str:
-        tool_name = self._pick_first_string(data, ["toolName", "tool", "name"]).lower()
-        if not tool_name:
+    def _summarize_tool_start(self, data: object, stream_state: StreamState) -> str:
+        if not isinstance(data, dict):
             return ""
+        tool_name = self._pick_first_string(data, ["toolName", "tool", "name"]).lower()
+        tool_call_id = self._pick_first_string(data, ["toolCallId", "callId", "id"])
+        arguments = self._extract_tool_arguments(data.get("arguments"))
+        if tool_call_id and tool_name:
+            stream_state.tool_calls[tool_call_id] = ToolCallContext(tool_name=tool_name, arguments=arguments)
+        return self._format_tool_start(tool_name, arguments)
+
+    def _summarize_tool_complete(self, data: object, stream_state: StreamState) -> str:
+        if not isinstance(data, dict):
+            return ""
+        tool_call_id = self._pick_first_string(data, ["toolCallId", "callId", "id"])
+        context = stream_state.tool_calls.pop(tool_call_id, None) if tool_call_id else None
+        tool_name = context.tool_name if context else self._pick_first_string(data, ["toolName", "tool", "name"]).lower()
+        arguments = context.arguments if context else self._extract_tool_arguments(data.get("arguments"))
+
+        if tool_name in {"report_intent", "sql"}:
+            return ""
+
+        success = bool(data.get("success", True))
+        if not success:
+            return self._format_tool_failure(tool_name, arguments, data)
+        return self._format_tool_success(tool_name, arguments, data)
+
+    def _format_tool_start(self, tool_name: str, arguments: dict[str, object]) -> str:
+        if not tool_name:
+            return "调用工具"
 
         if tool_name in {"report_intent", "sql"}:
             return ""
 
         path = self._pick_first_string(
-            data,
+            arguments,
             ["path", "filePath", "dirPath", "workspacePath", "includePattern", "resourcePath", "url"],
         )
-        query = self._pick_first_string(data, ["query", "symbol", "command", "taskId"])
-        result_text = self._extract_tool_result_text(data)
-        if result_text and "PowerShell 6+ (pwsh) is not available" in result_text:
-            return "命令执行失败: 当前环境缺少 pwsh（PowerShell 7）"
+        command = self._pick_first_string(arguments, ["command", "input"])
+        query = self._pick_first_string(arguments, ["query", "pattern", "symbol"])
+        description = self._pick_first_string(arguments, ["description", "task", "intent", "prompt"])
 
-        if tool_name in {"view", "read_file"}:
+        if tool_name in {"view", "read_file", "github-mcp-server-get_file_contents"}:
             if not path:
                 return "读取内容"
-            return f"读取文件: {path}" if self._looks_like_file(path) else f"扫描目录: {path}"
-        if tool_name in {"list_dir", "file_search"}:
-            return f"扫描目录: {path}" if path else "扫描目录"
-        if tool_name in {"grep_search", "semantic_search", "search_subagent"}:
-            return f"检索: {query}" if query else "检索代码"
-        if tool_name in {"run_in_terminal", "create_and_run_task"}:
-            if query:
-                return f"执行命令: {query}"
-            if result_text:
-                return self._shorten_single_line(result_text, 140)
-            return "执行命令"
-        if tool_name in {"apply_patch"}:
-            return "修改代码"
-        if tool_name in {"get_errors"}:
-            return "检查错误"
-        if tool_name in {"runsubagent"}:
-            return "启动子任务"
+            return f"读取文件：{path}" if self._looks_like_file(path) else f"读取目录：{path}"
 
-        return f"调用工具: {tool_name}"
+        if tool_name == "list_powershell":
+            return "列出 PowerShell 会话"
+
+        if tool_name == "list_agents":
+            return "列出后台 Agent"
+
+        if tool_name in {"glob", "list_dir", "file_search"}:
+            pattern = self._pick_first_string(arguments, ["pattern", "glob"])
+            if path and pattern:
+                return f"列出目录：{path}（pattern={pattern}）"
+            if pattern:
+                return f"列出目录（pattern={pattern}）"
+            if path:
+                return f"列出目录：{path}"
+            return "列出目录"
+
+        if tool_name in {"grep", "rg", "grep_search", "semantic_search", "search_subagent", "github-mcp-server-search_code"}:
+            search_context = self._build_context_suffix(arguments, [("path", "path"), ("glob", "glob")])
+            if query:
+                return f"检索代码：{query}{search_context}"
+            return f"检索代码{search_context}"
+
+        if tool_name in {"powershell", "run_in_terminal", "create_and_run_task", "read_powershell", "write_powershell"}:
+            if command:
+                return f"执行命令：{self._shorten_single_line(command, 180)}"
+            return "执行命令"
+
+        if tool_name in {"create", "apply_patch", "write_file"}:
+            if path:
+                return f"写入文件：{path}"
+            return "修改文件"
+
+        if tool_name in {"task", "runsubagent"}:
+            agent_type = self._pick_first_string(arguments, ["agent_type", "agentType"])
+            suffix = f"（agent={agent_type}）" if agent_type else ""
+            if description:
+                return f"启动子任务{suffix}：{self._shorten_single_line(description, 120)}"
+            return f"启动子任务{suffix}"
+
+        if tool_name in {"web_fetch", "github-mcp-server-get_commit", "github-mcp-server-actions_get"} and path:
+            return f"读取资源：{path}"
+        if tool_name in {"web_fetch"}:
+            url = self._pick_first_string(arguments, ["url"])
+            return f"抓取网页：{url}" if url else "抓取网页"
+
+        if tool_name == "fetch_copilot_cli_documentation":
+            return "获取 Copilot CLI 文档"
+
+        if tool_name in {"ask_user"}:
+            return "向用户提问"
+
+        if self._tool_name_has_any(tool_name, {"powershell", "terminal", "exec", "run"}):
+            if command:
+                return f"执行命令：{self._shorten_single_line(command, 180)}"
+            return "执行命令"
+        if self._tool_name_has_any(tool_name, {"search", "grep", "find"}):
+            return f"检索代码：{query}" if query else "检索代码"
+        if self._tool_name_has_any(tool_name, {"list", "ls"}):
+            if path:
+                return f"列表操作：{path}"
+            return "列表操作"
+        if self._tool_name_has_any(tool_name, {"read", "view", "get"}):
+            if path:
+                return f"读取资源：{path}"
+            return "读取资源"
+
+        return f"调用工具：{tool_name}"
+
+    def _format_tool_success(self, tool_name: str, arguments: dict[str, object], data: dict[str, object]) -> str:
+        result_text = self._extract_tool_result_text(data)
+        cleaned = self._strip_process_footer(result_text)
+        lowered = cleaned.lower()
+
+        if "intent logged" in lowered:
+            return ""
+
+        if tool_name in {"view", "read_file", "github-mcp-server-get_file_contents", "create", "apply_patch", "write_file", "stop_powershell"}:
+            return ""
+
+        if tool_name == "list_powershell":
+            title = "PowerShell 会话列表"
+            return self._summarize_list_result(cleaned, title=title)
+
+        if tool_name == "list_agents":
+            title = "后台 Agent 列表"
+            return self._summarize_list_result(cleaned, title=title)
+
+        if tool_name in {"glob", "list_dir", "file_search"}:
+            title = "目录列表" + self._build_context_suffix(arguments, [("path", "path"), ("pattern", "pattern"), ("glob", "glob")])
+            return self._summarize_list_result(cleaned, title=title)
+
+        if tool_name in {"grep", "rg", "grep_search", "semantic_search", "search_subagent", "github-mcp-server-search_code"}:
+            title = "代码检索结果" + self._build_context_suffix(
+                arguments,
+                [("query", "query"), ("pattern", "pattern"), ("symbol", "symbol"), ("path", "path"), ("glob", "glob")],
+            )
+            return self._summarize_list_result(cleaned, title=title, max_items=6, line_limit=120)
+
+        if tool_name in {"powershell", "run_in_terminal", "create_and_run_task", "read_powershell", "write_powershell"}:
+            command = self._pick_first_string(arguments, ["command", "input"])
+            return self._format_command_output(command, cleaned)
+
+        if tool_name in {"ask_user"}:
+            return ""
+
+        if tool_name == "fetch_copilot_cli_documentation":
+            return "文档已获取：Copilot CLI 文档（README + 帮助）"
+
+        if tool_name == "web_fetch":
+            url_suffix = self._build_context_suffix(arguments, [("url", "url")])
+            if not cleaned:
+                return f"网页抓取完成{url_suffix}"
+            return f"网页抓取结果{url_suffix}\n{self._shorten_multiline(cleaned, 1200)}"
+
+        if tool_name in {"task", "runsubagent"}:
+            return self._format_task_result(arguments, cleaned)
+
+        if self._tool_name_has_any(tool_name, {"powershell", "terminal", "exec", "run"}):
+            command = self._pick_first_string(arguments, ["command", "input"])
+            return self._format_command_output(command, cleaned)
+        if self._tool_name_has_any(tool_name, {"search", "grep", "find"}):
+            title = "代码检索结果" + self._build_context_suffix(
+                arguments,
+                [("query", "query"), ("pattern", "pattern"), ("symbol", "symbol"), ("path", "path"), ("glob", "glob")],
+            )
+            return self._summarize_list_result(cleaned, title=title, max_items=6, line_limit=120)
+        if self._tool_name_has_any(tool_name, {"list", "ls"}):
+            title = "列表结果" + self._build_context_suffix(arguments, [("path", "path"), ("pattern", "pattern"), ("glob", "glob")])
+            return self._summarize_list_result(cleaned, title=title)
+        if self._tool_name_has_any(tool_name, {"read", "view", "get"}):
+            return ""
+
+        if not cleaned:
+            return ""
+        if tool_name:
+            return f"{tool_name} 返回结果：{self._shorten_single_line(cleaned, 220)}"
+        return f"调用结果：{self._shorten_single_line(cleaned, 220)}"
+
+    def _format_tool_failure(self, tool_name: str, arguments: dict[str, object], data: dict[str, object]) -> str:
+        error = data.get("error")
+        error_text = self._pick_first_string(error, ["message", "code"]) if isinstance(error, dict) else ""
+        result_text = self._strip_process_footer(self._extract_tool_result_text(data))
+        detail = error_text or result_text or "未知错误"
+
+        if tool_name in {"powershell", "run_in_terminal", "create_and_run_task", "read_powershell", "write_powershell"}:
+            command = self._pick_first_string(arguments, ["command", "input"])
+            if command:
+                return f"命令执行失败（command={self._shorten_single_line(command, 100)}）\n{self._shorten_multiline(detail, 1200)}"
+            return f"命令执行失败\n{self._shorten_multiline(detail, 1200)}"
+
+        if tool_name in {"view", "read_file", "github-mcp-server-get_file_contents"}:
+            path = self._pick_first_string(arguments, ["path", "filePath", "resourcePath"])
+            if path:
+                return f"读取失败：{path}\n{self._shorten_single_line(detail, 220)}"
+            return f"读取失败：{self._shorten_single_line(detail, 220)}"
+
+        name = tool_name or "tool"
+        return f"{name} 失败：{self._shorten_single_line(detail, 220)}"
+
+    def _summarize_list_result(self, raw_text: str, title: str, max_items: int = 8, line_limit: int = 90) -> str:
+        lines = self._parse_result_lines(raw_text)
+        if not lines:
+            return f"{title}：空"
+
+        first_line = lines[0]
+        if first_line.lower().startswith("output too large to read at once"):
+            temp_path = ""
+            match = re.search(r"Saved to:\s*(.+)$", first_line, re.IGNORECASE)
+            if match:
+                temp_path = match.group(1).strip()
+            preview = [self._shorten_single_line(line, line_limit) for line in lines[1:4]]
+            body_lines = []
+            if temp_path:
+                body_lines.append(f"• 输出过大，已保存：{temp_path}")
+            else:
+                body_lines.append("• 输出过大，已保存到临时文件")
+            body_lines.extend(f"• {line}" for line in preview if line)
+            return f"{title}\n" + "\n".join(body_lines)
+
+        lowered = lines[0].lower()
+        if lowered.startswith("no files matched"):
+            return f"{title}：无匹配项"
+
+        shown = [self._shorten_single_line(line, line_limit) for line in lines[:max_items]]
+        omitted = len(lines) - len(shown)
+        body = "\n".join(f"• {line}" for line in shown)
+        if omitted > 0:
+            body += f"\n…其余 {omitted} 条已省略"
+        return f"{title} | 共 {len(lines)} 条\n{body}"
+
+    def _format_command_output(self, command: str, output: str) -> str:
+        normalized = output.replace("\r\n", "\n").replace("\r", "\n").strip()
+        command_label = self._shorten_single_line(command, 120) if command else ""
+        header = f"命令输出（command={command_label}）" if command_label else "命令输出"
+        if not normalized:
+            return f"{header}：无输出"
+
+        condensed = self._shorten_multiline(normalized, 1800)
+        return f"{header}\n{condensed}"
+
+    def _format_task_result(self, arguments: dict[str, object], result_text: str) -> str:
+        agent_type = self._pick_first_string(arguments, ["agent_type", "agentType"])
+        description = self._pick_first_string(arguments, ["description", "task", "prompt"])
+        suffix = self._build_context_suffix(
+            {"agent": agent_type, "description": description},
+            [("agent", "agent"), ("description", "description")],
+        )
+        title = "子任务结果" + suffix
+        if not result_text:
+            return f"{title}：空"
+        return f"{title}\n{self._shorten_multiline(result_text, 1400)}"
+
+    def _shorten_multiline(self, text: str, limit: int) -> str:
+        normalized = text.strip()
+        if len(normalized) <= limit:
+            return normalized
+        head = max(int(limit * 0.7), 1)
+        tail = max(limit - head - 40, 1)
+        omitted = len(normalized) - head - tail
+        return f"{normalized[:head].rstrip()}\n...(中间省略 {omitted} 字符)...\n{normalized[-tail:].lstrip()}"
+
+    def _parse_result_lines(self, raw_text: str) -> list[str]:
+        normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [line.strip() for line in normalized.split("\n") if line.strip()]
+        return [line for line in lines if not line.startswith("<exited with")]
+
+    def _strip_process_footer(self, text: str) -> str:
+        if not text:
+            return ""
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [line for line in normalized.split("\n") if line.strip()]
+        while lines and lines[-1].strip().startswith("<exited with"):
+            lines.pop()
+        return "\n".join(lines).strip()
+
+    def _extract_tool_arguments(self, value: object) -> dict[str, object]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("{") and stripped.endswith("}"):
+                try:
+                    parsed = json.loads(stripped)
+                except JSONDecodeError:
+                    return {}
+                return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    def _build_context_suffix(self, arguments: dict[str, object], fields: list[tuple[str, str]]) -> str:
+        pairs: list[str] = []
+        for key, label in fields:
+            value = self._pick_first_string(arguments, [key])
+            if not value:
+                continue
+            pairs.append(f"{label}={self._shorten_single_line(value, 80)}")
+        if not pairs:
+            return ""
+        return "（" + ", ".join(pairs) + "）"
+
+    def _tool_name_has_any(self, tool_name: str, tokens: set[str]) -> bool:
+        return any(token in tool_name for token in tokens)
 
     def _is_noisy_payload(self, data: dict[str, object]) -> bool:
         tool_name = self._pick_first_string(data, ["toolName", "tool", "name"]).lower()
@@ -399,7 +681,7 @@ class AssistantPlanner:
     def _looks_like_tool_payload(self, data: object) -> bool:
         if not isinstance(data, dict):
             return False
-        keys = {"toolName", "tool", "toolCallId", "success", "result", "toolTelemetry"}
+        keys = {"toolName", "tool", "toolCallId", "success", "result", "toolTelemetry", "arguments", "error"}
         return any(key in data for key in keys)
 
     def _extract_tool_result_text(self, data: object) -> str:

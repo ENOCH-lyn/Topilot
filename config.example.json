@@ -1,6 +1,6 @@
 {
   "telegram": {
-    "bot_token": "",
+    "bot_token": "x",
     "allowed_chat_ids": [
       123456789
     ],
@@ -8,7 +8,7 @@
   },
   "copilot": {
     "cli_command": "copilot",
-    "model": "gpt-4.1",
+    "model": "gpt-5-mini",
     "available_models": [],
     "timeout_seconds": 3600,
     "allow_all_tools": true,

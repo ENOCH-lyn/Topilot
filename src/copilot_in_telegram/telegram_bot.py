@@ -5,6 +5,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from html import escape
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.error import BadRequest
@@ -66,6 +67,7 @@ def build_application(settings: Settings) -> Application:
             self._last_reply_render = ""
             self._last_reply_edit_at = 0.0
             self._reply_started = False
+            self._progress_supports_html = True
             self._closed = False
 
         async def start(self) -> "TelegramLiveProgress":
@@ -138,13 +140,66 @@ def build_application(settings: Settings) -> Application:
             self._last_reply_edit_at = 0.0
             self._reply_started = False
 
-        def _render_progress(self) -> str:
+        def _render_progress_plain(self) -> str:
             state = "已完成" if self._closed else "进行中"
             lines = self._progress_lines[-12:]
             if not lines:
                 lines = ["处理中..."]
-            body = "\n".join(f"- {line}" for line in lines)
+            rendered_lines: list[str] = []
+            for line in lines:
+                parts = [part for part in line.splitlines() if part.strip()]
+                if not parts:
+                    continue
+                rendered_lines.append(f"- {parts[0]}")
+                rendered_lines.extend(f"  {part}" for part in parts[1:])
+            body = "\n".join(rendered_lines) if rendered_lines else "- 处理中..."
             return f"[过程] {state}\n{body}"
+
+        def _render_progress_html(self) -> str:
+            state = "已完成" if self._closed else "进行中"
+            lines = self._progress_lines[-12:]
+            if not lines:
+                lines = ["处理中..."]
+
+            html_lines: list[str] = []
+            for line in lines:
+                parts = [part for part in line.splitlines() if part.strip()]
+                if not parts:
+                    continue
+                headline = parts[0]
+                html_lines.append(f"• {escape(headline, quote=False)}")
+                detail_lines = parts[1:]
+                if not detail_lines:
+                    continue
+                detail = "\n".join(escape(part, quote=False) for part in detail_lines)
+                if self._should_use_expandable_quote(headline, detail_lines):
+                    html_lines.append(f"<blockquote expandable>{detail}</blockquote>")
+                else:
+                    html_lines.append(f"<blockquote>{detail}</blockquote>")
+
+            body = "\n".join(html_lines) if html_lines else "• 处理中..."
+            return f"<b>过程</b> [{state}]\n{body}"
+
+        def _should_use_expandable_quote(self, headline: str, detail_lines: list[str]) -> bool:
+            if self._is_result_section(headline):
+                return True
+            joined = "\n".join(detail_lines)
+            return len(joined) > 320 or len(detail_lines) > 6
+
+        def _is_result_section(self, headline: str) -> bool:
+            lowered = headline.lower()
+            keywords = (
+                "结果",
+                "输出",
+                "失败",
+                "列表",
+                "检索",
+                "抓取",
+                "子任务",
+                "返回",
+                "command=",
+            )
+            return any(keyword in lowered for keyword in keywords)
 
         def _render_reply(self) -> str:
             reply_text = self._reply_text()
@@ -227,22 +282,20 @@ def build_application(settings: Settings) -> Application:
                 return
             if not self._progress_lines and self._closed:
                 return
+            rendered = self._render_progress_plain()
             if self._progress_message is None:
-                self._progress_message = await self._send_raw(self._render_progress())
+                self._progress_message = await self._send_progress(rendered)
+                self._last_progress_render = rendered
+                self._last_progress_edit_at = time.monotonic()
                 return
             if not force and not self._can_edit_progress_now():
                 self._ensure_progress_flush_task()
                 return
-            rendered = self._render_progress()
             if rendered == self._last_progress_render:
                 return
             self._last_progress_render = rendered
             self._last_progress_edit_at = time.monotonic()
-            try:
-                await self._progress_message.edit_text(rendered)
-            except BadRequest as exc:
-                if "Message is not modified" not in str(exc):
-                    raise
+            await self._edit_progress(rendered)
 
         async def _flush_reply(self, force: bool = False) -> None:
             rendered = self._render_reply()
@@ -297,6 +350,41 @@ def build_application(settings: Settings) -> Application:
         async def _send_raw(self, text: str) -> Message:
             assert application is not None
             return await application.bot.send_message(chat_id=self._chat_id, text=text)
+
+        async def _send_progress(self, plain_text: str) -> Message:
+            assert application is not None
+            if self._progress_supports_html:
+                try:
+                    return await application.bot.send_message(
+                        chat_id=self._chat_id,
+                        text=self._render_progress_html(),
+                        parse_mode="HTML",
+                    )
+                except BadRequest as exc:
+                    if "can't parse entities" not in str(exc).lower():
+                        raise
+                    self._progress_supports_html = False
+            return await application.bot.send_message(chat_id=self._chat_id, text=plain_text)
+
+        async def _edit_progress(self, plain_text: str) -> None:
+            if self._progress_message is None:
+                return
+            if self._progress_supports_html:
+                try:
+                    await self._progress_message.edit_text(self._render_progress_html(), parse_mode="HTML")
+                    return
+                except BadRequest as exc:
+                    message = str(exc)
+                    if "Message is not modified" in message:
+                        return
+                    if "can't parse entities" not in message.lower():
+                        raise
+                    self._progress_supports_html = False
+            try:
+                await self._progress_message.edit_text(plain_text)
+            except BadRequest as exc:
+                if "Message is not modified" not in str(exc):
+                    raise
 
         async def _cancel_task(self, task: asyncio.Task[None] | None) -> None:
             if task is None or task.done():

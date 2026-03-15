@@ -86,5 +86,3 @@ copilot-in-telegram start
 - `/model`：查看/切换当前模型（内联按钮选择）
 - `/status`：查看运行状态
 - 直接发送文本将进入 Copilot 对话
-
-task_db_path
