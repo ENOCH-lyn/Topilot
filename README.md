@@ -41,15 +41,17 @@ Openclaw等项目消耗Token速度普遍较快，但是很多功能在日常生�
 
 ## 安装与启动
 
+克隆项目，然后在项目根目录执行
+
 ```powershell
 pip install -e .
-copilot login
-topilot
 ```
 
-首次运行会自动进入交互式配置向导，生成 `~/.topilot/config.json`
+待安装成功后执行`topilot`即可运行
 
-也可以手动执行
+首次运行会自动进入交互式配置向导，生成配置文件 `~/.topilot/config.json`
+
+也可以手动进行初始化
 
 ```powershell
 topilot init
