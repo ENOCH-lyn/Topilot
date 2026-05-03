@@ -1,0 +1,72 @@
+# 阶段1-Telegram接入与访问控制模块-执行计划
+
+## 1. 模块定位
+该模块是用户与系统交互的唯一正式入口，负责 Telegram Application 构建、命令注册、消息接收和白名单校验。其设计目标是在保证个人使用安全边界的前提下，提供清晰、稳定、可移动端使用的 Bot 交互体验。
+
+## 2. 模块核心功能
+1. 构建 Telegram Bot Application。
+2. 注册命令处理器、文本消息处理器和按钮回调处理器。
+3. 对业务命令和文本对话执行 Chat ID 白名单控制。
+4. 对未授权请求输出明确提示。
+5. 为后续流式回复和会话接管提供消息发送能力。
+
+## 3. 输入与输出
+
+### 3.1 输入
+1. Telegram 文本消息。
+2. Telegram 命令消息。
+3. 内联按钮回调数据。
+4. 配置中的 `telegram.bot_token`、`telegram.allowed_chat_ids`、`telegram.proxy_url`。
+
+### 3.2 输出
+1. Telegram 普通回复消息。
+2. 命令执行结果消息。
+3. 未授权访问的拒绝提示。
+4. 内联按钮菜单。
+
+## 4. 核心实现逻辑
+1. `telegram_bot.py` 中 `build_application()` 使用 `ApplicationBuilder` 构建 Bot。
+2. `restricted()` 装饰器在命令和文本处理器外层统一执行白名单校验。
+3. `/whoami` 保持可访问，用于获取授权所需的 chat_id。
+4. 命令类入口负责会话状态查询、模型菜单展示、会话菜单展示等路由分发。
+5. 文本消息默认进入 `TaskRunner.submit()`，作为 AI 对话输入。
+
+## 5. 技术方案与可选方案
+
+### 5.1 选用方案
+采用 `python-telegram-bot` 长轮询模式，使用命令处理器、消息处理器和回调处理器完成交互。
+
+### 5.2 可选方案比较
+1. Webhook 模式：适合公网服务，但增加部署复杂度。
+2. 长轮询模式：更适合当前本地自托管场景，最终选用。
+3. 自建 HTTP 网关：灵活但完全超出当前项目边界。
+
+## 6. 可自动化验收标准
+1. `build_application()` 构建出的 Application 必须注册以下命令：`whoami`、`llm`、`session_current`、`sessions`、`session_new`、`session_use`、`model`、`start`、`help`、`status`。
+2. 当 `telegram.allowed_chat_ids` 非空且请求 chat_id 不在列表中时，除 `/whoami` 外的业务命令和普通文本消息必须返回“当前用户未授权”提示，不得调用 `TaskRunner.submit()`。
+3. 当 `telegram.allowed_chat_ids` 为空时，系统必须允许所有 chat_id 正常进入业务流程。
+4. 当配置存在 `telegram.proxy_url` 时，ApplicationBuilder 必须同时设置消息发送代理和 getUpdates 代理。
+5. 对普通文本消息，系统必须把文本内容原样传入 `TaskRunner.submit(chat_id, text)`。
+
+## 7. 测试数据与测试方案
+
+### 7.1 测试数据
+1. 授权 chat_id。
+2. 非授权 chat_id。
+3. 空白名单配置。
+4. 带代理和不带代理两组配置。
+5. 命令消息与普通文本消息样例。
+
+### 7.2 测试方案
+1. 通过 mock Telegram Update 和 Context 执行处理器单元测试。
+2. 校验白名单通过与拒绝两条链路。
+3. 对命令注册表进行静态断言，防止漏挂命令。
+
+## 8. 模块依赖关系
+1. 依赖阶段1的配置与启动模块提供 Bot Token 和代理配置。
+2. 依赖 `TaskRunner` 作为业务编排层。
+
+## 9. 开发顺序
+1. 先实现 Application 构建和基础命令。
+2. 再加入 `restricted()` 白名单控制。
+3. 最后接入回调菜单和文本消息路由。
