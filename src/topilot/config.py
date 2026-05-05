@@ -8,6 +8,7 @@ from pathlib import Path
 
 from topilot.paths import AppPaths, build_app_paths, ensure_app_dirs
 
+
 def _parse_models(value: str | None) -> list[str]:
     """解析内容为模型列表"""
     if not value:
@@ -63,6 +64,23 @@ class ConfigurationError(RuntimeError):
     """配置缺失或非法时抛出的异常"""
 
     pass
+
+
+@dataclass(slots=True)
+class DoctorReport:
+    """启动前诊断结果"""
+
+    app_home: Path
+    config_path: Path
+    has_config: bool
+    config_status: str
+    telegram_token_status: str
+    copilot_cli_command: str | None
+    copilot_model: str | None
+    workspace_root: str | None
+    data_dir_exists: bool
+    logs_dir_exists: bool
+    workspace_dir_exists: bool
 
 
 def _parse_bool(value: object, default: bool) -> bool:
@@ -197,6 +215,52 @@ def has_config(app_home: Path | None = None) -> bool:
 
     paths = build_app_paths(app_home)
     return paths.config_file.exists()
+
+
+def doctor_report(app_home: Path | None = None) -> DoctorReport:
+    """返回默认配置目录的诊断结果"""
+
+    paths = build_app_paths(app_home)
+    config_path = paths.config_file
+    has_cfg = config_path.exists()
+
+    config_status = "missing"
+    telegram_token_status = "unknown"
+    copilot_cli_command: str | None = None
+    copilot_model: str | None = None
+    workspace_root: str | None = None
+
+    if has_cfg:
+        try:
+            payload = _read_json_config(config_path)
+        except ConfigurationError:
+            config_status = "invalid"
+            telegram_token_status = "invalid"
+        else:
+            config_status = "ok"
+            telegram = payload.get("telegram") if isinstance(payload.get("telegram"), dict) else {}
+            copilot = payload.get("copilot") if isinstance(payload.get("copilot"), dict) else {}
+            runtime = payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}
+
+            token = str(telegram.get("bot_token") or "").strip()
+            telegram_token_status = "set" if token else "empty"
+            copilot_cli_command = str(copilot.get("cli_command") or "copilot").strip() or "copilot"
+            copilot_model = str(copilot.get("model") or "gpt-5-mini").strip() or "gpt-5-mini"
+            workspace_root = str(runtime.get("workspace_root") or paths.workspace_dir.as_posix()).strip() or paths.workspace_dir.as_posix()
+
+    return DoctorReport(
+        app_home=paths.home_dir,
+        config_path=config_path,
+        has_config=has_cfg,
+        config_status=config_status,
+        telegram_token_status=telegram_token_status,
+        copilot_cli_command=copilot_cli_command,
+        copilot_model=copilot_model,
+        workspace_root=workspace_root,
+        data_dir_exists=paths.data_dir.exists(),
+        logs_dir_exists=paths.logs_dir.exists(),
+        workspace_dir_exists=paths.workspace_dir.exists(),
+    )
 
 
 def load_settings(app_home: Path | None = None) -> Settings:

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 
 from topilot.config import (
     ConfigurationError,
     default_config_payload,
+    doctor_report,
     has_config,
     load_settings,
     write_config,
@@ -80,6 +82,27 @@ def run_init(force: bool = False) -> int:
     return 0
 
 
+def run_doctor(app_home: Path | None = None) -> int:
+    """输出启动前诊断信息"""
+
+    report = doctor_report(app_home=app_home)
+    print(f"app_home={report.app_home}")
+    print(f"config={report.config_path}")
+    print(f"has_config={report.has_config}")
+    print(f"config_status={report.config_status}")
+    print(f"telegram_token={report.telegram_token_status}")
+    print(f"data_dir_exists={report.data_dir_exists}")
+    print(f"logs_dir_exists={report.logs_dir_exists}")
+    print(f"workspace_dir_exists={report.workspace_dir_exists}")
+    if report.workspace_root is not None:
+        print(f"workspace_root={report.workspace_root}")
+    if report.copilot_cli_command is not None:
+        print(f"copilot_cli_command={report.copilot_cli_command}")
+    if report.copilot_model is not None:
+        print(f"copilot_model={report.copilot_model}")
+    return 0
+
+
 def run_start() -> int:
     """加载配置并启动机器人"""
 
@@ -121,11 +144,7 @@ def main() -> None:
         raise SystemExit(run_init(force=bool(args.force)))
 
     if args.command == "doctor":
-        paths = build_app_paths()
-        print(f"app_home={paths.home_dir}")
-        print(f"config={paths.config_file}")
-        print(f"has_config={has_config()}")
-        return
+        raise SystemExit(run_doctor())
 
     if not has_config():
         print("检测到首次运行，开始配置")
