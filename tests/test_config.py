@@ -8,7 +8,6 @@ from topilot.config import (
     ConfigurationError,
     default_config_payload,
     load_settings,
-    payload_from_legacy_env,
     write_config,
 )
 from topilot.paths import build_app_paths
@@ -59,36 +58,3 @@ def test_load_settings_requires_non_empty_bot_token(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="telegram\\.bot_token 为空"):
         load_settings(paths.home_dir)
-
-
-def test_payload_from_legacy_env_maps_core_fields(tmp_path: Path) -> None:
-    paths = build_app_paths(tmp_path / "app")
-    env_values = {
-        "TELEGRAM_BOT_TOKEN": "legacy-token",
-        "TELEGRAM_ALLOWED_CHAT_IDS": "1,2,-3",
-        "TELEGRAM_PROXY_URL": "http://127.0.0.1:1080",
-        "COPILOT_CLI_COMMAND": "copilot.ps1",
-        "COPILOT_CLI_MODEL": "gpt-5",
-        "COPILOT_MODELS": "gpt-5,gpt-5-mini",
-        "COPILOT_CLI_TIMEOUT_SECONDS": "99",
-        "COPILOT_CLI_ALLOW_ALL_TOOLS": "false",
-        "COPILOT_CLI_ADD_WORKSPACE_DIR": "true",
-        "COPILOT_CLI_REASONING_EFFORT": "high",
-        "COPILOT_CLI_FORWARD_REASONING": "false",
-        "SESSION_WATCH_INTERVAL_SECONDS": "3.5",
-    }
-
-    payload = payload_from_legacy_env(paths, env_values)
-
-    assert payload["telegram"]["bot_token"] == "legacy-token"
-    assert payload["telegram"]["allowed_chat_ids"] == [1, 2, -3]
-    assert payload["telegram"]["proxy_url"] == "http://127.0.0.1:1080"
-    assert payload["copilot"]["cli_command"] == "copilot.ps1"
-    assert payload["copilot"]["model"] == "gpt-5"
-    assert payload["copilot"]["available_models"] == ["gpt-5", "gpt-5-mini"]
-    assert payload["copilot"]["timeout_seconds"] == 99
-    assert payload["copilot"]["allow_all_tools"] is False
-    assert payload["copilot"]["add_workspace_dir"] is True
-    assert payload["copilot"]["reasoning_effort"] == "high"
-    assert payload["copilot"]["forward_reasoning"] is False
-    assert payload["runtime"]["session_watch_interval_seconds"] == 3.5

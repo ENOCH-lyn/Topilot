@@ -27,7 +27,7 @@ copilot-in-telegram/
 │  └─ topilot/
 │     ├─ cli/                     # CLI 入口与子命令
 │     ├─ agent.py                 # Copilot CLI 调用、JSON 流解析、工具摘要
-│     ├─ config.py                # JSON 配置读写与旧版 .env 迁移
+│     ├─ config.py                # JSON 配置读写与配置校验
 │     ├─ conversation_store.py    # chats.json 对话历史持久化
 │     ├─ copilot_sessions.py      # 本地 session-state 扫描、接管、删除
 │     ├─ logging_setup.py         # 日志初始化与级别控制
@@ -38,7 +38,7 @@ copilot-in-telegram/
 │     ├─ task_runner.py           # Telegram 请求调度与业务编排
 │     └─ telegram_bot.py          # Telegram Bot 接入层、命令、按钮、流式展示
 ├─ tests/                         # pytest 测试目录，包含配置、存储、会话扫描、事件解析等基础测试
-├─ .env.example                   # 旧版环境变量配置示例（已废弃，仅迁移使用）
+├─ .env.example                   # 旧版环境变量配置示例（已废弃，仅历史保留）
 ├─ .gitattributes
 ├─ .gitignore
 ├─ cloud.md                       # 云与部署规范

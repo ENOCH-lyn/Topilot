@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 
 from topilot.config import (
     ConfigurationError,
     default_config_payload,
     has_config,
     load_settings,
-    parse_legacy_env_file,
-    payload_from_legacy_env,
     write_config,
 )
 from topilot.logging_setup import configure_logging
@@ -38,10 +35,10 @@ def _prompt_bool(prompt: str, default: bool) -> bool:
     return value in {"y", "yes", "1", "true", "on"}
 
 
-def run_init(app_home: Path | None = None, force: bool = False) -> int:
+def run_init(force: bool = False) -> int:
     """初始化配置文件"""
 
-    paths = build_app_paths(app_home)
+    paths = build_app_paths()
     ensure_app_dirs(paths)
 
     if paths.config_file.exists() and not force:
@@ -83,11 +80,11 @@ def run_init(app_home: Path | None = None, force: bool = False) -> int:
     return 0
 
 
-def run_start(app_home: Path | None = None) -> int:
+def run_start() -> int:
     """加载配置并启动机器人"""
 
     try:
-        settings = load_settings(app_home=app_home)
+        settings = load_settings()
     except ConfigurationError as exc:
         print(str(exc))
         return 1
@@ -105,12 +102,6 @@ def run_start(app_home: Path | None = None) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="topilot", description="Copilot Cli in Telegram")
-    parser.add_argument(
-        "--home",
-        dest="home",
-        default=None,
-        help="应用目录，默认 ~/.topilot",
-    )
 
     sub = parser.add_subparsers(dest="command")
 
@@ -118,56 +109,28 @@ def _build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--force", action="store_true", help="覆盖已存在配置")
 
     sub.add_parser("start", help="启动机器人")
-    sub.add_parser("config-path", help="显示配置文件路径")
-    sub.add_parser("doctor", help="检查运行前配置")
-    import_parser = sub.add_parser("import-env", help="从旧版 .env 迁移配置")
-    import_parser.add_argument("--env", default=".env", help="旧版 .env 路径，默认当前目录 .env")
-    import_parser.add_argument("--force", action="store_true", help="覆盖已存在 JSON 配置")
+    sub.add_parser("doctor", help="检查默认配置目录与配置状态")
     return parser
 
 
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
-    app_home = Path(args.home).expanduser().resolve() if args.home else None
 
     if args.command == "init":
-        raise SystemExit(run_init(app_home=app_home, force=bool(args.force)))
-
-    if args.command == "config-path":
-        print(build_app_paths(app_home).config_file)
-        return
+        raise SystemExit(run_init(force=bool(args.force)))
 
     if args.command == "doctor":
-        paths = build_app_paths(app_home)
+        paths = build_app_paths()
         print(f"app_home={paths.home_dir}")
         print(f"config={paths.config_file}")
-        print(f"has_config={has_config(app_home)}")
+        print(f"has_config={has_config()}")
         return
 
-    if args.command == "import-env":
-        paths = build_app_paths(app_home)
-        ensure_app_dirs(paths)
-        if paths.config_file.exists() and not bool(args.force):
-            print(f"配置已存在: {paths.config_file}")
-            print("如需覆盖请使用: topilot import-env --force")
-            raise SystemExit(1)
-
-        env_path = Path(args.env).expanduser().resolve()
-        values = parse_legacy_env_file(env_path)
-        if not values:
-            print(f"未读取到有效配置: {env_path}")
-            raise SystemExit(1)
-
-        payload = payload_from_legacy_env(paths, values)
-        write_config(payload, paths.config_file)
-        print(f"已迁移配置: {env_path} -> {paths.config_file}")
-        return
-
-    if not has_config(app_home):
+    if not has_config():
         print("检测到首次运行，开始配置")
-        code = run_init(app_home=app_home, force=False)
+        code = run_init(force=False)
         if code != 0:
             raise SystemExit(code)
 
-    raise SystemExit(run_start(app_home=app_home))
+    raise SystemExit(run_start())

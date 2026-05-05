@@ -4,7 +4,7 @@
 本文档用于描述 Topilot 当前版本的测试范围、测试环境、测试方法和测试用例设计。当前仓库已经补齐基础 `pytest` 自动化测试源码，覆盖配置解析、会话存储、本机会话扫描、Copilot 事件解析和 Telegram 纯逻辑辅助函数；同时，真实 Telegram 外网联调、真实 Copilot CLI 集成联调和覆盖率报告仍需继续补强。
 
 ## 2. 测试目标
-1. 验证配置、启动、迁移、诊断链路是否可用。
+1. 验证配置、启动、诊断链路是否可用。
 2. 验证 Telegram 入口、白名单控制和命令路由是否正确。
 3. 验证 Copilot CLI 调用、流式解析和异常处理是否符合设计。
 4. 验证会话管理、接管、删除和自动追踪是否符合预期。
@@ -44,8 +44,8 @@
 3. 手工验证：真实 Telegram 和真实 Copilot CLI 联调。
 
 ## 5.1 当前已落仓的 pytest 套件
-截至 2026-05-03，仓库已提交以下测试文件：
-1. `tests/test_config.py`：覆盖配置写入备份、配置加载、缺失 Token 异常、旧版 `.env` 映射。
+截至 2026-05-05，仓库已提交以下测试文件：
+1. `tests/test_config.py`：覆盖配置写入备份、配置加载、缺失 Token 异常。
 2. `tests/test_stores.py`：覆盖对话历史裁剪、会话激活、模型保存、会话删除。
 3. `tests/test_copilot_sessions.py`：覆盖 `session-state` 目录解析、历史提取、排序和删除。
 4. `tests/test_agent.py`：覆盖 Copilot CLI 参数组装、流式事件转译。
@@ -59,7 +59,7 @@ pytest
 
 本次实际结果：
 ```text
-13 passed
+12 passed
 ```
 
 ## 6. 测试用例
@@ -70,9 +70,8 @@ pytest
 | --- | --- | --- | --- | --- |
 | CFG-01 | 默认配置生成 | 空临时目录 | 执行 `topilot init --force` | 生成 `config.json`，包含五大分组 |
 | CFG-02 | 配置覆盖备份 | 已存在旧配置 | 写入新配置 | 生成 `config.backup-*.json` |
-| CFG-03 | 启动前诊断 | 已存在配置 | 执行 `topilot doctor` | 输出 `app_home`、`config`、`has_config` |
+| CFG-03 | 启动前诊断 | 已存在或不存在配置均可 | 执行 `topilot doctor` | 输出 `app_home`、`config`、`has_config` |
 | CFG-04 | 缺少 Token 启动失败 | `telegram.bot_token` 为空 | 执行 `topilot start` | 返回非零状态并提示缺失字段 |
-| CFG-05 | 旧版 `.env` 迁移 | 准备完整 `.env` 文件 | 执行 `topilot import-env` | 生成映射正确的 JSON 配置 |
 
 ### 6.2 Telegram 接入与访问控制模块
 
@@ -117,7 +116,7 @@ pytest
 1. 每次执行测试时，需记录执行日期、执行环境、执行人、用例编号、是否通过、失败原因。
 2. 对手工验证项，应附 Telegram 截图或日志片段作为证据。
 3. 对自动化测试项，应保存命令输出和失败堆栈。
-4. 2026-05-03 的本地基线结果为 `pytest` 执行 13 项全部通过，可作为当前仓库版本的基础测试记录。
+4. 2026-05-05 的本地基线结果为 `pytest` 执行 12 项全部通过，可作为当前仓库版本的基础测试记录。
 
 ## 8. 覆盖率要求
 1. 当前仓库尚未具备可核验的自动化覆盖率报告。

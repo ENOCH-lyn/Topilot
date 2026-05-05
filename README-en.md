@@ -47,7 +47,7 @@ copilot login
 topilot
 ```
 
-On first run, an interactive setup wizard starts automatically and generates `~/.topilot/config.json`.
+On first run, an interactive setup wizard starts automatically and generates the default config file at `~/.topilot/config.json`.
 
 Or run manually:
 
@@ -58,7 +58,7 @@ topilot start
 
 ## Configuration
 
-You can edit the configuration JSON file manually. Default path: `~/.topilot/config.json`.
+You can edit the configuration JSON file manually. Its fixed path is `~/.topilot/config.json`.
 
 Directory structure:
 

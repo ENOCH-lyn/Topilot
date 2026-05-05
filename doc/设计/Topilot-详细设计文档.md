@@ -11,13 +11,13 @@
 `src/topilot/cli/main.py`
 
 #### 2.1.2 职责
-1. 提供 `init`、`start`、`config-path`、`doctor`、`import-env` 子命令。
+1. 提供 `init`、`start`、`doctor` 子命令。
 2. 在首次运行时自动触发初始化。
 3. 统一调度配置加载、日志初始化与 Telegram Application 启动。
 
 #### 2.1.3 设计要点
 1. CLI 入口不直接处理业务逻辑，只做环境准备和流程分发。
-2. 所有路径通过 `--home` 可重定向到临时目录，便于测试。
+2. 配置文件固定存放在 `~/.topilot/config.json`，避免出现多套配置目录。
 
 ### 2.2 配置与路径模块
 
@@ -28,7 +28,7 @@
 1. 定义应用目录结构。
 2. 提供默认配置模板。
 3. 负责 JSON 配置读写、备份、字段解析与强校验。
-4. 兼容旧版 `.env` 配置迁移。
+4. 负责 JSON 配置读写、备份、字段解析与强校验。
 
 #### 2.2.3 设计原因
 1. 使用 `Settings` 数据类集中承载运行配置，减少下游模块耦合。
@@ -115,10 +115,8 @@
 | 命令 | 入参 | 输出 | 权限 | 异常 |
 | --- | --- | --- | --- | --- |
 | `topilot init [--force]` | 交互式输入或覆盖标志 | 生成配置文件 | 本地命令行用户 | 配置目录无权限、输入为空 |
-| `topilot start` | 可选 `--home` | 启动 Bot 长轮询 | 本地命令行用户 | 配置缺失、Token 为空 |
-| `topilot config-path` | 无 | 输出配置文件路径 | 本地命令行用户 | 无 |
-| `topilot doctor` | 无 | 输出 app_home、config、has_config | 本地命令行用户 | 无 |
-| `topilot import-env --env <path>` | 旧版 `.env` 路径 | 迁移配置到 JSON | 本地命令行用户 | 文件不存在、无有效字段 |
+| `topilot start` | 无 | 启动 Bot 长轮询 | 本地命令行用户 | 配置缺失、Token 为空 |
+| `topilot doctor` | 无 | 输出默认 app_home、config、has_config | 本地命令行用户 | 无 |
 
 ### 3.2 Telegram 命令接口
 

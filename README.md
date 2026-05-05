@@ -49,7 +49,7 @@ pip install -e .
 
 待安装成功后执行`topilot`即可运行
 
-首次运行会自动进入交互式配置向导，生成配置文件 `~/.topilot/config.json`
+首次运行会自动进入交互式配置向导，生成默认配置文件 `~/.topilot/config.json`
 
 也可以手动进行初始化
 
@@ -60,7 +60,7 @@ topilot start
 
 ## 配置说明
 
-可自行修改配置json文件，默认位置 `~/.topilot/config.json`
+可自行修改配置 JSON 文件，固定位置为 `~/.topilot/config.json`
 
 目录结构
 
