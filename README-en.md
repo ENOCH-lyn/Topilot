@@ -91,7 +91,7 @@ Common configuration fields:
 
 - `/whoami`: View current chat/user info
 - `/llm`: View Topilot backend status
-- `/session_current`: View current session ID
+- `/session_current`: View current session ID with a brief summary
 - `/sessions`: Session management entry (list/takeover/history/delete)
 - `/session_new [title]`: Create and switch to a new session
 - `/session_use <session_id_prefix>`: Switch session

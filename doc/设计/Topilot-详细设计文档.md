@@ -126,7 +126,7 @@
 | `/help` | 无 | 命令列表 | 受白名单控制 | 未授权提示 |
 | `/whoami` | 无 | chat_id / user_id / username | 开放 | 无 |
 | `/llm` | 无 | 后端状态文本 | 受白名单控制 | 未授权提示 |
-| `/session_current` | 无 | 当前会话 ID | 受白名单控制 | 未授权提示 |
+| `/session_current` | 无 | 当前会话 ID 及简要摘要 | 受白名单控制 | 未授权提示 |
 | `/sessions` | 无 | 会话菜单 | 受白名单控制 | 未授权提示 |
 | `/session_new [title]` | 可选标题 | 新建并切换会话 | 受白名单控制 | 未授权提示 |
 | `/session_use <prefix>` | 会话前缀 | 切换或接管结果 | 受白名单控制 | 会话不存在 / 未授权 |

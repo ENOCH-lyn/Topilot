@@ -93,7 +93,7 @@ topilot start
 
 - `/whoami`：查看当前 chat/user 信息
 - `/llm`：查看 Topilot 后端状态
-- `/session_current`：查看当前会话 ID
+- `/session_current`：查看当前会话 ID 与简要摘要
 - `/sessions`：会话管理入口（列表/接管/历史/删除）
 - `/session_new [title]`：新建并切换到会话
 - `/session_use <session_id前缀>`：切换会话

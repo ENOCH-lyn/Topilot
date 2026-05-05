@@ -312,9 +312,22 @@ class TaskRunner:
         logger.info("模型已切换 chat_id=%s model=%s", chat_id, model)
 
     def session_current_text(self, chat_id: int) -> str:
-        """返回当前会话 ID"""
+        """返回当前会话简要摘要"""
         session_id = self._sessions.ensure_active_session(chat_id)
-        return f"当前 Copilot 会话: {session_id}"
+        session_meta = self._sessions.get_session(chat_id, session_id) or {}
+        model = str(session_meta.get("model") or self.current_model(chat_id))
+        source = str(session_meta.get("source") or "bot")
+        running = bool(session_meta.get("running", False))
+        workspace = str(session_meta.get("cwd") or self._settings.workspace_root.as_posix())
+        title = str(session_meta.get("title") or "session")
+        return (
+            f"当前 Copilot 会话: {session_id}\n"
+            f"会话标题: {title}\n"
+            f"会话来源: {source}\n"
+            f"会话状态: {'运行中' if running else '空闲'}\n"
+            f"当前模型: {model}\n"
+            f"工作区: {workspace}"
+        )
 
     def session_list_text(self, chat_id: int) -> str:
         """返回会话列表文本，按最近使用时间排序，标记当前会话"""

@@ -78,3 +78,31 @@ def test_task_runner_status_text_includes_model_source_workspace_and_state(make_
     assert "当前模型: gpt-5" in text
     assert "工作区: C:/workspace/project-a" in text
     assert "最近活动: 2026-05-05T10:20:30Z" in text
+
+
+def test_task_runner_session_current_text_includes_brief_session_summary(make_settings) -> None:
+    settings = make_settings()
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    runner = TaskRunner(settings, _send_message)
+    session_id = runner._sessions.create_session(100, title="quick-check")
+    runner._sessions.upsert_session(
+        100,
+        session_id,
+        title="quick-check",
+        cwd="C:/workspace/mobile",
+        model="gpt-5-mini",
+        source="bot",
+        running=False,
+    )
+
+    text = runner.session_current_text(100)
+
+    assert f"当前 Copilot 会话: {session_id}" in text
+    assert "会话标题: quick-check" in text
+    assert "会话来源: bot" in text
+    assert "会话状态: 空闲" in text
+    assert "当前模型: gpt-5-mini" in text
+    assert "工作区: C:/workspace/mobile" in text
