@@ -46,7 +46,7 @@
 ## 5.1 当前已落仓的 pytest 套件
 截至 2026-05-05，仓库已提交以下测试文件：
 1. `tests/test_config.py`：覆盖配置写入备份、配置加载、缺失 Token 异常与 `doctor` 诊断输出。
-2. `tests/test_stores.py`：覆盖对话历史裁剪、会话激活、模型保存、会话删除。
+2. `tests/test_stores.py`：覆盖对话历史裁剪、会话激活、模型保存、会话删除和状态摘要。
 3. `tests/test_copilot_sessions.py`：覆盖 `session-state` 目录解析、历史提取、排序和删除。
 4. `tests/test_agent.py`：覆盖 Copilot CLI 参数组装、流式事件转译。
 5. `tests/test_telegram_helpers.py`：覆盖模型按钮布局、文本分块、会话菜单渲染。
@@ -59,7 +59,7 @@ pytest
 
 本次实际结果：
 ```text
-15 passed
+16 passed
 ```
 
 ## 6. 测试用例

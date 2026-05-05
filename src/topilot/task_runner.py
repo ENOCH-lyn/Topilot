@@ -272,8 +272,23 @@ class TaskRunner:
         """返回后端状态与当前会话信息"""
 
         session_id = self._sessions.ensure_active_session(chat_id)
-        model = self._sessions.active_model(chat_id)
-        return f"后端状态: {self._planner.llm_status_text(model)}\n当前会话: {session_id}"
+        session_meta = self._sessions.get_session(chat_id, session_id) or {}
+        model = self.current_model(chat_id)
+        source = str(session_meta.get("source") or "bot")
+        running = bool(session_meta.get("running", False))
+        workspace = str(session_meta.get("cwd") or self._settings.workspace_root.as_posix())
+        title = str(session_meta.get("title") or "session")
+        last_event_at = str(session_meta.get("last_event_at") or session_meta.get("last_used_at") or "-")
+        return (
+            f"后端状态: {self._planner.llm_status_text(model)}\n"
+            f"当前会话: {session_id}\n"
+            f"会话标题: {title}\n"
+            f"会话来源: {source}\n"
+            f"会话状态: {'运行中' if running else '空闲'}\n"
+            f"当前模型: {model}\n"
+            f"工作区: {workspace}\n"
+            f"最近活动: {last_event_at}"
+        )
 
     def llm_status_text(self, chat_id: int | None = None) -> str:
         """返回 LLM 状态文本"""
