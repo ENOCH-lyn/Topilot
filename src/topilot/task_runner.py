@@ -134,7 +134,7 @@ class TaskRunner:
             )
             if info.model:
                 self._sessions.set_model(chat_id, info.model)
-        chosen = self._sessions.set_active(chat_id, session_id)
+        chosen = self._sessions.set_active_exact(chat_id, session_id)
         if not chosen:
             return "未找到该会话"
         return f"已接管会话: {chosen}"
@@ -360,15 +360,35 @@ class TaskRunner:
 
     def session_use_text(self, chat_id: int, session_id_prefix: str) -> str:
         """切换会话到指定 ID 前缀的会话"""
-        session_id = self._sessions.set_active(chat_id, session_id_prefix)
-        if session_id is None:
-            needle = session_id_prefix.strip().lower()
-            for item in self.session_menu_items(chat_id, limit=100):
-                sid = str(item.get("id", ""))
-                if sid.lower().startswith(needle):
-                    return self.takeover_session(chat_id, sid)
+        needle = session_id_prefix.strip().lower()
+        if not needle:
             return f"未找到会话: {session_id_prefix}"
-        return f"已切换到会话: {session_id}"
+
+        stored_matches = self._sessions.find_session_ids_by_prefix(chat_id, needle)
+        if len(stored_matches) > 1:
+            return self._ambiguous_session_prefix_text(needle, stored_matches)
+        if len(stored_matches) == 1:
+            session_id = self._sessions.set_active_exact(chat_id, stored_matches[0])
+            return f"已切换到会话: {session_id}" if session_id else f"未找到会话: {session_id_prefix}"
+
+        local_matches = [
+            str(item.get("id", ""))
+            for item in self.session_menu_items(chat_id, limit=100)
+            if str(item.get("id", "")).lower().startswith(needle)
+        ]
+        if len(local_matches) > 1:
+            return self._ambiguous_session_prefix_text(needle, local_matches)
+        if len(local_matches) == 1:
+            return self.takeover_session(chat_id, local_matches[0])
+        return f"未找到会话: {session_id_prefix}"
+
+    def _ambiguous_session_prefix_text(self, prefix: str, matches: list[str]) -> str:
+        """返回前缀歧义提示"""
+
+        previews = "、".join(session_id[:12] for session_id in matches[:5])
+        omitted = len(matches) - 5
+        suffix = f" 等 {len(matches)} 个" if omitted > 0 else ""
+        return f"会话前缀不唯一: {prefix}，匹配 {previews}{suffix}；请提供更长的 session_id 前缀"
 
     def _active_session_summary(self, chat_id: int, session_id: str) -> dict:
         """返回当前会话摘要，本地 session-state 的实时信息优先于旧持久化记录"""

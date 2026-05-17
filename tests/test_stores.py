@@ -50,6 +50,22 @@ def test_session_store_tracks_active_session_and_model(tmp_path: Path) -> None:
     assert reloaded.active_model(100) == "gpt-5"
 
 
+def test_session_store_requires_unique_prefix_when_switching(tmp_path: Path) -> None:
+    db_path = tmp_path / "sessions.json"
+    store = SessionStore(db_path)
+
+    first = "abc123-session-a"
+    second = "abc456-session-b"
+    store.upsert_session(100, first, title="first")
+    store.upsert_session(100, second, title="second")
+
+    assert set(store.find_session_ids_by_prefix(100, "abc")) == {first, second}
+    assert store.set_active(100, "abc") is None
+    assert store.active_session(100) is None
+    assert store.set_active(100, "abc123") == first
+    assert store.active_session(100) == first
+
+
 def test_task_runner_status_text_includes_model_source_workspace_and_state(make_settings) -> None:
     settings = make_settings()
 
@@ -192,3 +208,47 @@ def test_task_runner_submit_persists_default_session_metadata(make_settings) -> 
     assert session_meta["model"] == "gpt-5-mini"
     assert session_meta["source"] == "bot"
     assert sent == [(100, "done")]
+
+
+def test_task_runner_session_use_reports_ambiguous_stored_prefix(make_settings) -> None:
+    settings = make_settings()
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    runner = TaskRunner(settings, _send_message)
+    runner._sessions.upsert_session(100, "abc123-session-a", title="first")
+    runner._sessions.upsert_session(100, "abc456-session-b", title="second")
+
+    text = runner.session_use_text(100, "abc")
+
+    assert "会话前缀不唯一: abc" in text
+    assert "abc123-sessi" in text
+    assert "abc456-sessi" in text
+    assert runner._sessions.active_session(100) is None
+
+
+def test_task_runner_session_use_takes_over_unique_discovered_prefix(make_settings) -> None:
+    settings = make_settings()
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    runner = TaskRunner(settings, _send_message)
+    live_info = CopilotSessionInfo(
+        session_id="local-session-001",
+        cwd="C:/live",
+        model="gpt-5",
+        summary="local work",
+        running=False,
+        last_event_at="2026-05-05T12:00:00Z",
+        history_lines=[],
+    )
+    runner._inspector.get_session = lambda sid: live_info if sid == live_info.session_id else None
+    runner._inspector.list_sessions = lambda limit=20: [live_info]
+
+    text = runner.session_use_text(100, "local-session")
+
+    assert text == "已接管会话: local-session-001"
+    assert runner._sessions.active_session(100) == "local-session-001"
+    assert runner._sessions.active_model(100) == "gpt-5"

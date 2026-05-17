@@ -141,20 +141,39 @@ class SessionStore:
         sessions.sort(key=lambda item: item.get("last_used_at", ""), reverse=True)
         return sessions[:limit]
 
-    def set_active(self, chat_id: int, session_id_prefix: str) -> str | None:
-        """根据会话 ID 前缀切换当前会话"""
+    def find_session_ids_by_prefix(self, chat_id: int, session_id_prefix: str) -> list[str]:
+        """返回匹配指定前缀的会话 ID 列表"""
 
         needle = session_id_prefix.strip().lower()
         if not needle:
-            return None
+            return []
+        matches: list[str] = []
         for item in self._chat_sessions(chat_id):
             session_id = str(item.get("id", ""))
             if session_id.lower().startswith(needle):
+                matches.append(session_id)
+        return matches
+
+    def set_active_exact(self, chat_id: int, session_id: str) -> str | None:
+        """按完整会话 ID 设置当前激活会话"""
+
+        if not self._find_session(chat_id, session_id):
+            return None
+        for item in self._chat_sessions(chat_id):
+            if str(item.get("id", "")) == session_id:
                 self._payload["active"][self._chat_key(chat_id)] = session_id
                 item["last_used_at"] = _now_iso()
                 self.save()
                 return session_id
         return None
+
+    def set_active(self, chat_id: int, session_id_prefix: str) -> str | None:
+        """根据会话 ID 前缀切换当前会话"""
+
+        matches = self.find_session_ids_by_prefix(chat_id, session_id_prefix)
+        if len(matches) != 1:
+            return None
+        return self.set_active_exact(chat_id, matches[0])
 
     def delete_session(self, chat_id: int, session_id: str) -> bool:
         """删除会话记录"""
