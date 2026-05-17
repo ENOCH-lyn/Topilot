@@ -83,13 +83,13 @@ class TaskRunner:
             merged.append(
                 {
                     "id": sid,
-                    "title": str(item.get("title", "session")),
-                    "cwd": item.get("cwd") or external.get("cwd"),
-                    "model": item.get("model") or external.get("model"),
-                    "running": bool(item.get("running") if "running" in item else external.get("running", False)),
-                    "last_event_at": item.get("last_event_at") or external.get("last_event_at") or item.get("last_used_at"),
+                    "title": str(external.get("title") or item.get("title", "session")),
+                    "cwd": external.get("cwd") or item.get("cwd"),
+                    "model": external.get("model") or item.get("model"),
+                    "running": bool(external.get("running", item.get("running", False))),
+                    "last_event_at": external.get("last_event_at") or item.get("last_event_at") or item.get("last_used_at"),
                     "stored": True,
-                    "source": item.get("source") or external.get("source", "saved"),
+                    "source": external.get("source") or item.get("source") or "saved",
                 }
             )
 
@@ -227,12 +227,22 @@ class TaskRunner:
         model = self._sessions.active_model(chat_id)
         active_session_meta = self._sessions.get_session(chat_id, active_session_id) or {}
         workspace_dir = str(active_session_meta.get("cwd", "")).strip() or None
+        effective_model = model or self._settings.copilot_cli_model
+        effective_workspace = workspace_dir or self._settings.workspace_root.as_posix()
+        self._sessions.upsert_session(
+            chat_id,
+            active_session_id,
+            title=str(active_session_meta.get("title") or "default"),
+            cwd=effective_workspace,
+            model=effective_model,
+            source=str(active_session_meta.get("source") or "bot"),
+        )
         try:
             plan = await self._planner.plan(
                 active_session_id,
                 history,
                 instruction,
-                model=model,
+                model=effective_model,
                 workspace_dir=workspace_dir,
                 progress_logger=live_progress.log if live_progress else None,
                 reply_streamer=live_progress.reply if live_progress else None,
@@ -272,8 +282,8 @@ class TaskRunner:
         """返回后端状态与当前会话信息"""
 
         session_id = self._sessions.ensure_active_session(chat_id)
-        session_meta = self._sessions.get_session(chat_id, session_id) or {}
-        model = self.current_model(chat_id)
+        session_meta = self._active_session_summary(chat_id, session_id)
+        model = str(session_meta.get("model") or self.current_model(chat_id))
         source = str(session_meta.get("source") or "bot")
         running = bool(session_meta.get("running", False))
         workspace = str(session_meta.get("cwd") or self._settings.workspace_root.as_posix())
@@ -314,7 +324,7 @@ class TaskRunner:
     def session_current_text(self, chat_id: int) -> str:
         """返回当前会话简要摘要"""
         session_id = self._sessions.ensure_active_session(chat_id)
-        session_meta = self._sessions.get_session(chat_id, session_id) or {}
+        session_meta = self._active_session_summary(chat_id, session_id)
         model = str(session_meta.get("model") or self.current_model(chat_id))
         source = str(session_meta.get("source") or "bot")
         running = bool(session_meta.get("running", False))
@@ -359,3 +369,21 @@ class TaskRunner:
                     return self.takeover_session(chat_id, sid)
             return f"未找到会话: {session_id_prefix}"
         return f"已切换到会话: {session_id}"
+
+    def _active_session_summary(self, chat_id: int, session_id: str) -> dict:
+        """返回当前会话摘要，本地 session-state 的实时信息优先于旧持久化记录"""
+
+        stored = self._sessions.get_session(chat_id, session_id) or {}
+        info = self._inspector.get_session(session_id)
+        if info is None:
+            return stored
+        return {
+            **stored,
+            "id": session_id,
+            "title": info.summary or stored.get("title") or "session",
+            "cwd": info.cwd or stored.get("cwd"),
+            "model": info.model or stored.get("model"),
+            "source": "local",
+            "last_event_at": info.last_event_at or stored.get("last_event_at"),
+            "running": info.running,
+        }

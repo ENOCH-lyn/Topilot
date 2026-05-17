@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from topilot.copilot_sessions import CopilotSessionInfo
 from topilot.conversation_store import ConversationStore
+from topilot.models import ActionType, PlannedAction
 from topilot.task_runner import TaskRunner
 from topilot.session_store import SessionStore
 
@@ -106,3 +108,87 @@ def test_task_runner_session_current_text_includes_brief_session_summary(make_se
     assert "会话状态: 空闲" in text
     assert "当前模型: gpt-5-mini" in text
     assert "工作区: C:/workspace/mobile" in text
+
+
+def test_task_runner_prefers_live_local_session_metadata_for_summaries(make_settings) -> None:
+    settings = make_settings()
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    runner = TaskRunner(settings, _send_message)
+    session_id = runner._sessions.create_session(100, title="old-title")
+    runner._sessions.upsert_session(
+        100,
+        session_id,
+        title="old-title",
+        cwd="C:/old",
+        model="gpt-5-mini",
+        source="bot",
+        running=False,
+    )
+
+    live_info = CopilotSessionInfo(
+        session_id=session_id,
+        cwd="C:/live",
+        model="gpt-5",
+        summary="live-title",
+        running=True,
+        last_event_at="2026-05-05T12:00:00Z",
+        history_lines=[],
+    )
+    runner._inspector.get_session = lambda sid: live_info if sid == session_id else None
+    runner._inspector.list_sessions = lambda limit=20: [live_info]
+
+    current_text = runner.session_current_text(100)
+    status_text = runner.status_text(100)
+    menu_items = runner.session_menu_items(100)
+
+    assert "会话标题: live-title" in current_text
+    assert "会话来源: local" in current_text
+    assert "会话状态: 运行中" in current_text
+    assert "当前模型: gpt-5" in current_text
+    assert "工作区: C:/live" in current_text
+    assert "最近活动: 2026-05-05T12:00:00Z" in status_text
+    assert menu_items[0]["title"] == "live-title"
+    assert menu_items[0]["running"] is True
+    assert menu_items[0]["source"] == "local"
+
+
+def test_task_runner_submit_persists_default_session_metadata(make_settings) -> None:
+    settings = make_settings(copilot_cli_model="gpt-5-mini")
+    sent: list[tuple[int, str]] = []
+    captured: dict[str, object] = {}
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        sent.append((chat_id, text))
+
+    class FakePlanner:
+        async def plan(self, session_id, history, instruction, **kwargs):
+            captured["session_id"] = session_id
+            captured["history"] = history
+            captured["instruction"] = instruction
+            captured["model"] = kwargs.get("model")
+            captured["workspace_dir"] = kwargs.get("workspace_dir")
+            return PlannedAction(
+                action_type=ActionType.RESPOND_ONLY,
+                summary="ok",
+                assistant_message="done",
+            )
+
+    runner = TaskRunner(settings, _send_message)
+    runner._planner = FakePlanner()
+
+    import asyncio
+
+    asyncio.run(runner.submit(100, "hello"))
+
+    session_id = str(captured["session_id"])
+    session_meta = runner._sessions.get_session(100, session_id) or {}
+
+    assert captured["model"] == "gpt-5-mini"
+    assert captured["workspace_dir"] is None
+    assert session_meta["cwd"] == settings.workspace_root.as_posix()
+    assert session_meta["model"] == "gpt-5-mini"
+    assert session_meta["source"] == "bot"
+    assert sent == [(100, "done")]

@@ -129,25 +129,57 @@ class AssistantPlanner:
         获取失败时返回配置中的 COPILOT_MODELS
         """
         try:
-            command = self._resolve_copilot_command()
+            argv = self._build_copilot_help_argv()
             proc = await asyncio.create_subprocess_exec(
-                command, "--help",
+                *argv,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
             raw, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
             text = raw.decode(errors="replace")
-            # 匹配 --model 说明段中的 choices 列表
-            m = re.search(r"--model\s+<model>.*?choices:\s*(.*?)\)", text, re.DOTALL)
-            if m:
-                models = re.findall(r'"([^"]+)"', m.group(1))
-                if models:
-                    logger.info("实时获取到 %d 个可用模型", len(models))
-                    return models
+            models = self._parse_available_models_from_help(text)
+            if models:
+                logger.info("实时获取到 %d 个可用模型", len(models))
+                return models
         except Exception as exc:
             logger.warning("获取模型列表失败: %s", exc)
-        # 回退到显式配置列表
-        return list(self._settings.copilot_available_models)
+        # 回退到显式配置列表；若未配置列表，至少保留当前默认模型用于 /model 展示和切换确认。
+        fallback_models = list(self._settings.copilot_available_models)
+        if fallback_models:
+            return fallback_models
+        return [self._settings.copilot_cli_model]
+
+    def _build_copilot_help_argv(self) -> list[str]:
+        """构造 Copilot CLI 帮助命令，兼容 Windows PowerShell 脚本入口"""
+
+        command = self._resolve_copilot_command()
+        if command.lower().endswith(".ps1"):
+            return [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                command,
+                "--help",
+            ]
+        return [command, "--help"]
+
+    def _parse_available_models_from_help(self, text: str) -> list[str]:
+        """从 Copilot CLI 帮助文本中解析 --model choices 列表"""
+
+        model_section = re.search(r"--model\s+<model>.*?choices:\s*(.*?)\)", text, re.DOTALL)
+        if not model_section:
+            return []
+
+        seen: set[str] = set()
+        models: list[str] = []
+        for model in re.findall(r'"([^"]+)"', model_section.group(1)):
+            if model in seen:
+                continue
+            seen.add(model)
+            models.append(model)
+        return models
 
     async def _plan_with_copilot_cli(
         self,

@@ -583,6 +583,11 @@ def build_application(settings: Settings) -> Application:
 
         if data.startswith("sdel:"):
             sid = data.split(":", 1)[1]
+            await _edit_session_delete_confirm(query, chat_id, sid)
+            return
+
+        if data.startswith("sdelok:"):
+            sid = data.split(":", 1)[1]
             text = runner.delete_session(chat_id, sid, delete_local=True)
             await _edit_session_menu(query, chat_id, page=0, prefix=text)
             return
@@ -613,6 +618,17 @@ def build_application(settings: Settings) -> Application:
             ]
         )
         await query.edit_message_text(text, reply_markup=keyboard)
+
+    async def _edit_session_delete_confirm(query, chat_id: int, session_id: str) -> None:
+        text = runner.session_detail_text(chat_id, session_id)
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("确认删除", callback_data=f"sdelok:{session_id}")],
+                [InlineKeyboardButton("取消", callback_data=f"sopen:{session_id}")],
+                [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
+            ]
+        )
+        await query.edit_message_text(f"确认删除该会话？\n\n{text}", reply_markup=keyboard)
 
     async def _stop_session_watch(chat_id: int) -> None:
         task = session_watch_tasks.pop(chat_id, None)
@@ -685,7 +701,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("help", restricted(settings, help_command)))
     application.add_handler(CommandHandler("status", restricted(settings, status_command)))
     application.add_handler(CallbackQueryHandler(model_select_callback, pattern=r"^model_sel:"))
-    application.add_handler(CallbackQueryHandler(session_callback, pattern=r"^(smenu:|sopen:|suse:|shis:|sdel:)"))
+    application.add_handler(CallbackQueryHandler(session_callback, pattern=r"^(smenu:|sopen:|suse:|shis:|sdel:|sdelok:)"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, restricted(settings, text_message)))
 
     return application
@@ -741,11 +757,13 @@ def _render_session_menu(items: list[dict], page: int, page_size: int = 6) -> tu
     for item in current_items:
         sid = str(item.get("id", ""))
         short_sid = sid[:8]
+        title = _shorten_menu_text(str(item.get("title") or "session"), 18)
         model = str(item.get("model") or "unknown")
+        source = str(item.get("source") or "saved")
         running = "🟢" if item.get("running") else "⚪"
         active = "⭐" if item.get("active") else ""
-        lines.append(f"{running}{active} {short_sid} | {model}")
-        keyboard.append([InlineKeyboardButton(f"打开 {short_sid}", callback_data=f"sopen:{sid}")])
+        lines.append(f"{running}{active} {short_sid} | {title} | {model} | {source}")
+        keyboard.append([InlineKeyboardButton(f"打开 {short_sid} {title}", callback_data=f"sopen:{sid}")])
 
     nav: list[InlineKeyboardButton] = []
     if page > 0:
@@ -756,3 +774,10 @@ def _render_session_menu(items: list[dict], page: int, page_size: int = 6) -> tu
     keyboard.append(nav)
 
     return "\n".join(lines), keyboard
+
+
+def _shorten_menu_text(text: str, limit: int) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[:limit] + "..."

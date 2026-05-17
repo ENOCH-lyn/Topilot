@@ -26,13 +26,28 @@ def test_chunk_and_trim_helpers_keep_telegram_safe_lengths() -> None:
 def test_render_session_menu_shows_active_and_running_marks() -> None:
     text, keyboard = _render_session_menu(
         [
-            {"id": "abcdef123456", "model": "gpt-5-mini", "running": True, "active": True},
-            {"id": "fedcba654321", "model": "gpt-5", "running": False, "active": False},
+            {
+                "id": "abcdef123456",
+                "title": "mobile checkout bug",
+                "model": "gpt-5-mini",
+                "source": "local",
+                "running": True,
+                "active": True,
+            },
+            {
+                "id": "fedcba654321",
+                "title": "docs",
+                "model": "gpt-5",
+                "source": "saved",
+                "running": False,
+                "active": False,
+            },
         ],
         page=0,
         page_size=6,
     )
 
-    assert "🟢⭐ abcdef12 | gpt-5-mini" in text
-    assert "⚪ fedcba65 | gpt-5" in text
+    assert "🟢⭐ abcdef12 | mobile checkout bu... | gpt-5-mini | local" in text
+    assert "⚪ fedcba65 | docs | gpt-5 | saved" in text
     assert keyboard[0][0].callback_data == "sopen:abcdef123456"
+    assert keyboard[0][0].text == "打开 abcdef12 mobile checkout bu..."

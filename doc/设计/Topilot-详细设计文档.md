@@ -48,7 +48,7 @@
 #### 2.3.3 设计要点
 1. 使用 `restricted()` 装饰器统一做权限校验，降低 handler 重复代码。
 2. 使用 `TelegramLiveProgress` 承担所有流式消息编辑和限频逻辑。
-3. 使用按钮回调数据前缀区分菜单类型，如 `model_sel:`、`smenu:`、`sopen:`、`suse:`、`shis:`、`sdel:`。
+3. 使用按钮回调数据前缀区分菜单类型，如 `model_sel:`、`smenu:`、`sopen:`、`suse:`、`shis:`、`sdel:`、`sdelok:`。
 
 ### 2.4 任务编排模块
 
@@ -64,6 +64,7 @@
 #### 2.4.3 设计要点
 1. `TaskRunner` 是系统业务协调中心，但不直接关心 Telegram API 细节。
 2. 对流式输出通过 `LiveProgress` 协议抽象，避免与具体消息实现耦合。
+3. 当前会话摘要优先读取实时 `session-state` 元数据，避免已保存会话在本机状态变化后仍展示旧模型、旧工作区或旧运行状态。
 
 ### 2.5 Copilot CLI 调用模块
 
@@ -142,7 +143,8 @@
 | `sopen:` | 打开会话详情 | `sopen:<session_id>` |
 | `suse:` | 接管会话 | `suse:<session_id>` |
 | `shis:` | 查看会话历史 | `shis:<session_id>` |
-| `sdel:` | 删除会话 | `sdel:<session_id>` |
+| `sdel:` | 进入删除确认页 | `sdel:<session_id>` |
+| `sdelok:` | 确认删除会话 | `sdelok:<session_id>` |
 
 ## 4. 数据结构设计
 
@@ -230,10 +232,11 @@
 ## 5. 核心算法设计
 
 ### 5.1 模型列表解析算法
-1. 启动子进程执行 `copilot --help`。
-2. 使用正则定位 `--model <model>` 的 choices 段。
-3. 解析引号包裹的模型名称。
-4. 若失败则回退到配置中的 `available_models`。
+1. 通过 `_build_copilot_help_argv()` 构造帮助命令，普通可执行文件使用 `<command> --help`，`.ps1` 入口使用 PowerShell `-File <command> --help` 包装。
+2. 启动子进程读取帮助输出，并使用正则定位 `--model <model>` 的 choices 段。
+3. 解析引号包裹的模型名称，并去重保留原顺序。
+4. 若实时解析失败，则回退到配置中的 `available_models`。
+5. 若配置回退列表为空，则至少返回当前默认模型，保证 `/model` 不因空列表失效。
 
 ### 5.2 流事件转译算法
 1. 逐行读取 CLI 标准输出。
@@ -251,7 +254,7 @@
 ### 5.4 会话列表合并算法
 1. 先取 Bot 已保存会话列表。
 2. 再取本机发现会话列表。
-3. 以 `session_id` 去重。
+3. 以 `session_id` 去重；同一会话同时存在于两侧时，标题、模型、工作区、运行状态和最后事件时间优先采用本机实时扫描结果。
 4. 以 `last_event_at` 或 `last_used_at` 逆序排序。
 5. 对当前会话加 `active` 标记。
 
