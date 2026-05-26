@@ -18,6 +18,7 @@
 #### 2.1.3 设计要点
 1. CLI 入口不直接处理业务逻辑，只做环境准备和流程分发。
 2. 配置文件固定存放在 `~/.topilot/config.json`，避免出现多套配置目录。
+3. `doctor` 不启动 Telegram，也不调用真实 Copilot 对话，只做配置、目录、命令可执行性和问题清单诊断，便于用户在启动前定位故障。
 
 ### 2.2 配置与路径模块
 
@@ -28,7 +29,7 @@
 1. 定义应用目录结构。
 2. 提供默认配置模板。
 3. 负责 JSON 配置读写、备份、字段解析与强校验。
-4. 提供启动前诊断报告，汇总配置文件状态、关键目录状态与核心配置摘要。
+4. 提供启动前诊断报告，汇总配置文件状态、关键目录状态、Copilot CLI 命令解析结果、运行工作区状态与问题清单。
 
 #### 2.2.3 设计原因
 1. 使用 `Settings` 数据类集中承载运行配置，减少下游模块耦合。
@@ -76,11 +77,14 @@
 2. 启动子进程并消费标准输出/标准错误。
 3. 解析 JSON 流事件并分类。
 4. 将工具调用与命令输出压缩为中文摘要。
+5. 提供 Copilot CLI 运行前诊断能力，用于 `/llm`、`/status` 和请求失败提示。
 
 #### 2.5.3 设计要点
 1. 通过 `--resume <session_id>` 保证上下文连续，而不是把完整历史手工拼接进 prompt。
 2. 对 Windows `.bat`/`.cmd` 命令做换行转义，避免参数截断。
 3. 对不同类型工具结果采用不同摘要策略，提高移动端可读性。
+4. 在调用前检查 `copilot.cli_command` 是否可解析、工作区是否存在、超时配置是否有效；未就绪时不启动子进程，直接返回可行动的中文提示。
+5. 对非零退出码、超时和空输出分别生成稳定错误摘要，并建议用户执行 `topilot doctor` 排查。
 
 ### 2.6 会话扫描模块
 
@@ -117,7 +121,7 @@
 | --- | --- | --- | --- | --- |
 | `topilot init [--force]` | 交互式输入或覆盖标志 | 生成配置文件 | 本地命令行用户 | 配置目录无权限、输入为空 |
 | `topilot start` | 无 | 启动 Bot 长轮询 | 本地命令行用户 | 配置缺失、Token 为空 |
-| `topilot doctor` | 无 | 输出默认 app_home、config、has_config，以及基础配置健康摘要 | 本地命令行用户 | 无 |
+| `topilot doctor` | 无 | 输出 `app_home`、`config`、`has_config`、配置状态、Token 状态、Copilot 命令解析、命令可执行性、工作区状态、超时配置和问题清单 | 本地命令行用户 | 无 |
 
 ### 3.2 Telegram 命令接口
 
@@ -126,7 +130,7 @@
 | `/start` | 无 | 命令列表 | 受白名单控制 | 未授权提示 |
 | `/help` | 无 | 命令列表 | 受白名单控制 | 未授权提示 |
 | `/whoami` | 无 | chat_id / user_id / username | 开放 | 无 |
-| `/llm` | 无 | 后端状态文本 | 受白名单控制 | 未授权提示 |
+| `/llm` | 无 | Copilot 后端诊断报告，包含状态、命令、解析路径、工作区、模型、调用参数、候选模型和待处理问题 | 受白名单控制 | 未授权提示 |
 | `/session_current` | 无 | 当前会话 ID 及简要摘要 | 受白名单控制 | 未授权提示 |
 | `/sessions` | 无 | 会话菜单 | 受白名单控制 | 未授权提示 |
 | `/session_new [title]` | 可选标题 | 新建并切换会话 | 受白名单控制 | 未授权提示 |
@@ -177,12 +181,33 @@
 | `logging` | `console_log_level` | string | 控制台日志级别 |
 | `logging` | `httpx_log_level` | string | `httpx` 日志级别 |
 
-### 4.2 `chats.json`
+### 4.2 `DoctorReport`
 
 #### 4.2.1 设计思路
+`DoctorReport` 是 `topilot doctor` 的结构化输出来源，只读取配置与文件系统状态，不发起 Telegram 或 Copilot 对话请求，确保诊断命令安全、快速、可重复。
+
+#### 4.2.2 字段设计
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `has_config` | bool | `~/.topilot/config.json` 是否存在 |
+| `config_status` | string | `missing`、`invalid` 或 `ok` |
+| `telegram_token_status` | string | `unknown`、`invalid`、`empty` 或 `set` |
+| `copilot_cli_command` | string/null | 配置中的 Copilot CLI 命令 |
+| `copilot_cli_resolved_command` | string/null | 解析后的可执行路径或原始命令 |
+| `copilot_cli_runnable` | bool/null | 当前系统是否能找到或访问该命令 |
+| `copilot_model` | string/null | 默认模型 |
+| `copilot_timeout_seconds` | int/null | Copilot 调用超时秒数 |
+| `workspace_root` | string/null | 运行工作区路径 |
+| `runtime_workspace_exists` | bool/null | 运行工作区是否存在 |
+| `issues` | array[string] | 可直接展示给用户的问题清单 |
+
+### 4.3 `chats.json`
+
+#### 4.3.1 设计思路
 按 `chat_id` 为 key 存储最近对话轮次，避免引入数据库。
 
-#### 4.2.2 结构
+#### 4.3.2 结构
 
 ```json
 {
@@ -196,12 +221,12 @@
 }
 ```
 
-### 4.3 `sessions.json`
+### 4.4 `sessions.json`
 
-#### 4.3.1 设计思路
+#### 4.4.1 设计思路
 把“当前会话”“会话列表”“当前模型”三类状态放在一个 JSON 文件中，便于按 Chat 维度管理。
 
-#### 4.3.2 结构
+#### 4.4.2 结构
 
 ```json
 {
@@ -231,14 +256,24 @@
 
 ## 5. 核心算法设计
 
-### 5.1 模型列表解析算法
-1. 通过 `_build_copilot_help_argv()` 构造帮助命令，普通可执行文件使用 `<command> --help`，`.ps1` 入口使用 PowerShell `-File <command> --help` 包装。
-2. 启动子进程读取帮助输出，并使用正则定位 `--model <model>` 的 choices 段。
-3. 解析引号包裹的模型名称，并去重保留原顺序。
-4. 若实时解析失败，则回退到配置中的 `available_models`。
-5. 若配置回退列表为空，则至少返回当前默认模型，保证 `/model` 不因空列表失效。
+### 5.1 Copilot CLI 诊断算法
+1. 读取 `copilot.cli_command`、当前模型、默认工作区、超时、工具权限和推理强度配置。
+2. 通过 `_resolve_copilot_command()` 解析可执行命令：优先使用配置命令，失败时尝试系统 PATH 中的 `copilot`，再尝试 VS Code Copilot CLI 的 `.bat`/`.ps1` 默认位置。
+3. 判断解析后的命令是否可启动：PATH 命令使用 `shutil.which()`，路径命令检查文件是否存在。
+4. 判断实际工作区是否存在；若接管会话传入的工作区不可用，则回退到默认工作区。
+5. 判断 `copilot.timeout_seconds` 是否大于 0。
+6. 将所有问题聚合进 `issues`，生成 `CopilotCliDiagnostic`；若 `issues` 为空，状态为“Copilot CLI 已就绪”，否则为“Copilot CLI 未就绪”。
+7. `/llm` 使用诊断对象渲染完整报告；`/status` 使用同一诊断对象渲染后端状态；普通对话在未就绪时直接返回失败提示，不启动 Copilot 子进程。
 
-### 5.2 流事件转译算法
+### 5.2 模型列表解析算法
+1. 通过 `_build_copilot_help_argv()` 构造帮助命令，普通可执行文件使用 `<command> --help`，`.ps1` 入口使用 PowerShell `-File <command> --help` 包装。
+2. 若 Copilot CLI 诊断未就绪，则跳过实时探测，避免启动必然失败的子进程。
+3. 启动子进程读取帮助输出，并使用正则定位 `--model <model>` 的 choices 段。
+4. 解析引号包裹的模型名称，并去重保留原顺序。
+5. 若实时解析失败，则回退到配置中的 `available_models`。
+6. 若配置回退列表为空，则至少返回当前默认模型，保证 `/model` 不因空列表失效。
+
+### 5.3 流事件转译算法
 1. 逐行读取 CLI 标准输出。
 2. 非 JSON 行直接忽略。
 3. 对 `assistant.message_delta` 进入回复流。
@@ -246,19 +281,19 @@
 5. 对噪声事件过滤。
 6. 对 `assistant.message` 作为无 delta 场景的兜底最终回复。
 
-### 5.3 回复拼接算法
+### 5.4 回复拼接算法
 1. 若新 chunk 以前缀形式覆盖现有内容，则直接替换。
 2. 若现有内容与新 chunk 存在后缀/前缀重叠，则只拼接差量部分。
 3. 若 chunk 很短且像标点或零碎 delta，则直接追加。
 
-### 5.4 会话列表合并算法
+### 5.5 会话列表合并算法
 1. 先取 Bot 已保存会话列表。
 2. 再取本机发现会话列表。
 3. 以 `session_id` 去重；同一会话同时存在于两侧时，标题、模型、工作区、运行状态和最后事件时间优先采用本机实时扫描结果。
 4. 以 `last_event_at` 或 `last_used_at` 逆序排序。
 5. 对当前会话加 `active` 标记。
 
-### 5.5 会话前缀切换算法
+### 5.6 会话前缀切换算法
 1. `/session_use <prefix>` 先在 Bot 已保存会话中查找匹配前缀。
 2. 若已保存会话存在多个匹配项，返回“会话前缀不唯一”提示，不切换当前会话。
 3. 若已保存会话唯一匹配，则按完整会话 ID 切换当前会话。
@@ -272,9 +307,11 @@
 | 配置文件不存在 | 抛出 `ConfigurationError`，首次运行自动引导初始化 |
 | 配置文件为空或 JSON 非法 | 启动失败并返回明确错误 |
 | `telegram.bot_token` 为空 | 启动失败并提示缺失字段 |
-| Copilot CLI 不可用 | 返回统一后端未就绪提示 |
-| Copilot CLI 超时 | 杀掉子进程并返回超时提示 |
-| Copilot CLI 返回非零退出码 | 返回 stderr/out 摘要 |
+| Copilot CLI 命令不存在或不可执行 | `/llm` 和 `topilot doctor` 展示命令解析问题；普通请求返回后端未就绪提示 |
+| Copilot 工作区不存在 | 诊断报告写入 `issues`；普通请求不启动子进程 |
+| Copilot CLI 超时 | 杀掉子进程，返回包含超时秒数和排查建议的提示 |
+| Copilot CLI 返回非零退出码 | 返回退出码和 stderr/out 的 200 字符内摘要 |
+| Copilot CLI 返回空输出 | 返回“stdout/stderr 均为空”的明确提示，并提示检查登录、命令路径和 `--output-format json` 支持 |
 | Telegram HTML 解析失败 | 自动回退为纯文本过程消息 |
 | 会话目录不存在 | 返回“会话不存在或已被删除” |
 | 会话 ID 前缀匹配多个会话 | 返回“会话前缀不唯一”，要求提供更长前缀 |

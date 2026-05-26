@@ -80,9 +80,14 @@ topilot start
 - `telegram.bot_token`：Telegram 机器人令牌（必填）
 - `telegram.allowed_chat_ids`：允许访问的 Telegram Chat ID，多个用逗号分隔。留空代表允许所有 Chat ID 访问，强烈建议配置以保证安全
 - `telegram.proxy_url`：如需使用代理访问 Telegram API，需要设置代理 URL，例如 `http://127.0.0.1:10808`
-- `topilot.cli_command`：运行Copilot CLI 所需的命令，默认 `copilot`
-- `topilot.model`：Copilot CLI 默认使用的模型，默认为`gpt-5-mini`
-- `topilot.timeout_seconds`：单次调用超时秒数，默认为3600
+- `copilot.cli_command`：运行 Copilot CLI 所需的命令，默认 `copilot`
+- `copilot.model`：Copilot CLI 默认使用的模型，默认为 `gpt-5-mini`
+- `copilot.available_models`：模型实时发现失败时使用的回退候选列表
+- `copilot.timeout_seconds`：单次调用超时秒数，默认为 3600
+- `copilot.allow_all_tools`：调用 Copilot CLI 时是否附带 `--allow-all-tools`
+- `copilot.add_workspace_dir`：调用 Copilot CLI 时是否自动附带 `--add-dir`
+- `copilot.reasoning_effort`：传递给 Copilot CLI 的推理强度，可为空
+- `copilot.forward_reasoning`：是否在非流式路径转发思考文本
 - `runtime.workspace_root`：默认工作区路径
 - `runtime.session_watch_interval_seconds`：接管会话轮询间隔
 - `logging.log_level`：文件日志级别
@@ -92,13 +97,13 @@ topilot start
 ## Bot 可用命令
 
 - `/whoami`：查看当前 chat/user 信息
-- `/llm`：查看 Topilot 后端状态
+- `/llm`：查看 Copilot 后端诊断报告，包括命令、解析路径、工作区、模型、调用参数和待处理问题
 - `/session_current`：查看当前会话 ID 与简要摘要
 - `/sessions`：会话管理入口（列表/接管/历史/删除）
 - `/session_new [title]`：新建并切换到会话
-- `/session_use <session_id前缀>`：切换会话
+- `/session_use <session_id前缀>`：按唯一前缀切换已保存会话，或接管本机发现的唯一匹配会话；前缀不唯一时会拒绝切换
 - `/model`：查看/切换当前模型
-- `/status`：查看运行状态
+- `/status`：查看后端状态、当前会话、来源、状态、模型和工作区摘要
 - 直接发送文本将进入对话
 
 ## 待办

@@ -2,6 +2,7 @@ from __future__ import annotations
 """项目配置加载模块"""
 
 import json
+import shutil
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,11 +77,16 @@ class DoctorReport:
     config_status: str
     telegram_token_status: str
     copilot_cli_command: str | None
+    copilot_cli_resolved_command: str | None
+    copilot_cli_runnable: bool | None
     copilot_model: str | None
+    copilot_timeout_seconds: int | None
     workspace_root: str | None
     data_dir_exists: bool
     logs_dir_exists: bool
     workspace_dir_exists: bool
+    runtime_workspace_exists: bool | None
+    issues: list[str]
 
 
 def _parse_bool(value: object, default: bool) -> bool:
@@ -139,6 +145,31 @@ def _parse_int(value: object, default: int) -> int:
         return int(str(value).strip())
     except ValueError:
         return default
+
+
+def _resolve_command_for_report(command: str | None) -> str:
+    """为 doctor 诊断解析命令路径，不执行命令本身"""
+
+    configured = (command or "").strip()
+    if not configured:
+        return ""
+    resolved = shutil.which(configured)
+    if resolved:
+        return Path(resolved).as_posix()
+    return configured
+
+
+def _command_is_runnable_for_report(command: str | None) -> bool:
+    """判断 doctor 报告中的命令是否可被当前系统启动"""
+
+    resolved = _resolve_command_for_report(command)
+    if not resolved:
+        return False
+    if shutil.which(resolved):
+        return True
+    if "/" in resolved or "\\" in resolved or Path(resolved).is_absolute():
+        return Path(resolved).expanduser().exists()
+    return False
 
 
 def _read_json_config(config_path: Path) -> dict:
@@ -227,8 +258,13 @@ def doctor_report(app_home: Path | None = None) -> DoctorReport:
     config_status = "missing"
     telegram_token_status = "unknown"
     copilot_cli_command: str | None = None
+    copilot_cli_resolved_command: str | None = None
+    copilot_cli_runnable: bool | None = None
     copilot_model: str | None = None
+    copilot_timeout_seconds: int | None = None
     workspace_root: str | None = None
+    runtime_workspace_exists: bool | None = None
+    issues: list[str] = []
 
     if has_cfg:
         try:
@@ -236,6 +272,7 @@ def doctor_report(app_home: Path | None = None) -> DoctorReport:
         except ConfigurationError:
             config_status = "invalid"
             telegram_token_status = "invalid"
+            issues.append("配置文件不是合法 JSON 对象")
         else:
             config_status = "ok"
             telegram = payload.get("telegram") if isinstance(payload.get("telegram"), dict) else {}
@@ -244,9 +281,23 @@ def doctor_report(app_home: Path | None = None) -> DoctorReport:
 
             token = str(telegram.get("bot_token") or "").strip()
             telegram_token_status = "set" if token else "empty"
+            if not token:
+                issues.append("telegram.bot_token 为空")
             copilot_cli_command = str(copilot.get("cli_command") or "copilot").strip() or "copilot"
+            copilot_cli_resolved_command = _resolve_command_for_report(copilot_cli_command)
+            copilot_cli_runnable = _command_is_runnable_for_report(copilot_cli_command)
+            if not copilot_cli_runnable:
+                issues.append(f"Copilot CLI 命令不可执行: {copilot_cli_command}")
             copilot_model = str(copilot.get("model") or "gpt-5-mini").strip() or "gpt-5-mini"
+            copilot_timeout_seconds = _parse_int(copilot.get("timeout_seconds"), 3600)
+            if copilot_timeout_seconds <= 0:
+                issues.append("copilot.timeout_seconds 必须大于 0")
             workspace_root = str(runtime.get("workspace_root") or paths.workspace_dir.as_posix()).strip() or paths.workspace_dir.as_posix()
+            runtime_workspace_exists = Path(workspace_root).expanduser().exists()
+            if not runtime_workspace_exists:
+                issues.append(f"工作区不存在: {workspace_root}")
+    else:
+        issues.append("配置文件不存在")
 
     return DoctorReport(
         app_home=paths.home_dir,
@@ -255,11 +306,16 @@ def doctor_report(app_home: Path | None = None) -> DoctorReport:
         config_status=config_status,
         telegram_token_status=telegram_token_status,
         copilot_cli_command=copilot_cli_command,
+        copilot_cli_resolved_command=copilot_cli_resolved_command,
+        copilot_cli_runnable=copilot_cli_runnable,
         copilot_model=copilot_model,
+        copilot_timeout_seconds=copilot_timeout_seconds,
         workspace_root=workspace_root,
         data_dir_exists=paths.data_dir.exists(),
         logs_dir_exists=paths.logs_dir.exists(),
         workspace_dir_exists=paths.workspace_dir.exists(),
+        runtime_workspace_exists=runtime_workspace_exists,
+        issues=issues,
     )
 
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
+
 from topilot.telegram_bot import _build_model_keyboard, _chunk_text, _is_allowed, _render_session_menu, _trim_telegram_text, restricted
 
 
@@ -115,3 +117,51 @@ def test_restricted_handler_rejects_unauthorized_chat(make_settings) -> None:
     assert update.effective_message.replies == [
         "当前用户未授权，请使用 /whoami 获取 chat id，并写入配置项 telegram.allowed_chat_ids"
     ]
+
+
+def test_build_application_registers_required_commands_callbacks_and_text_handler(make_settings) -> None:
+    from topilot.telegram_bot import build_application
+
+    app = build_application(make_settings())
+    handlers = app.handlers[0]
+
+    command_handlers = [handler for handler in handlers if isinstance(handler, CommandHandler)]
+    commands = {
+        command
+        for handler in command_handlers
+        for command in handler.commands
+    }
+
+    assert commands == {
+        "whoami",
+        "llm",
+        "session_current",
+        "sessions",
+        "session_new",
+        "session_use",
+        "model",
+        "start",
+        "help",
+        "status",
+    }
+
+    callback_patterns = [
+        handler.pattern.pattern
+        for handler in handlers
+        if isinstance(handler, CallbackQueryHandler)
+    ]
+    assert callback_patterns == [
+        "^model_sel:",
+        r"^(smenu:|sopen:|suse:|shis:|sdel:|sdelok:)",
+    ]
+
+    message_handlers = [handler for handler in handlers if isinstance(handler, MessageHandler)]
+    assert len(message_handlers) == 1
+
+    callbacks_by_command = {
+        next(iter(handler.commands)): handler.callback.__qualname__
+        for handler in command_handlers
+    }
+    assert callbacks_by_command["whoami"].endswith("whoami_command")
+    for command in commands - {"whoami"}:
+        assert callbacks_by_command[command].endswith("restricted.<locals>.wrapped")

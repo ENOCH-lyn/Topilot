@@ -81,11 +81,16 @@ def test_doctor_report_shows_missing_config_and_existing_runtime_dirs(tmp_path: 
 
 def test_doctor_report_extracts_core_fields_from_valid_config(tmp_path: Path) -> None:
     paths = build_app_paths(tmp_path / "app")
+    fake_copilot = tmp_path / "copilot.cmd"
+    fake_copilot.write_text("@echo off\n", encoding="utf-8")
+    workspace = tmp_path / "workspace-root"
+    workspace.mkdir()
     payload = default_config_payload(paths)
     payload["telegram"]["bot_token"] = "telegram-token"
-    payload["copilot"]["cli_command"] = "copilot.cmd"
+    payload["copilot"]["cli_command"] = fake_copilot.as_posix()
     payload["copilot"]["model"] = "gpt-5"
-    payload["runtime"]["workspace_root"] = (tmp_path / "workspace-root").as_posix()
+    payload["copilot"]["timeout_seconds"] = 180
+    payload["runtime"]["workspace_root"] = workspace.as_posix()
 
     write_config(payload, paths.config_file)
 
@@ -94,16 +99,46 @@ def test_doctor_report_extracts_core_fields_from_valid_config(tmp_path: Path) ->
     assert report.has_config is True
     assert report.config_status == "ok"
     assert report.telegram_token_status == "set"
-    assert report.copilot_cli_command == "copilot.cmd"
+    assert report.copilot_cli_command == fake_copilot.as_posix()
+    assert report.copilot_cli_resolved_command == fake_copilot.as_posix()
+    assert report.copilot_cli_runnable is True
     assert report.copilot_model == "gpt-5"
-    assert report.workspace_root == (tmp_path / "workspace-root").as_posix()
+    assert report.copilot_timeout_seconds == 180
+    assert report.workspace_root == workspace.as_posix()
+    assert report.runtime_workspace_exists is True
+    assert report.issues == []
+
+
+def test_doctor_report_collects_configuration_issues(tmp_path: Path) -> None:
+    paths = build_app_paths(tmp_path / "app")
+    missing_workspace = tmp_path / "missing-workspace"
+    payload = default_config_payload(paths)
+    payload["telegram"]["bot_token"] = ""
+    payload["copilot"]["cli_command"] = (tmp_path / "missing-copilot.cmd").as_posix()
+    payload["copilot"]["timeout_seconds"] = 0
+    payload["runtime"]["workspace_root"] = missing_workspace.as_posix()
+
+    write_config(payload, paths.config_file)
+
+    report = doctor_report(paths.home_dir)
+
+    assert report.config_status == "ok"
+    assert report.telegram_token_status == "empty"
+    assert report.copilot_cli_runnable is False
+    assert report.runtime_workspace_exists is False
+    assert "telegram.bot_token 为空" in report.issues
+    assert "copilot.timeout_seconds 必须大于 0" in report.issues
+    assert f"工作区不存在: {missing_workspace.as_posix()}" in report.issues
 
 
 def test_run_doctor_prints_extended_health_summary(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
     paths = build_app_paths(tmp_path / "app")
+    fake_copilot = tmp_path / "copilot.cmd"
+    fake_copilot.write_text("@echo off\n", encoding="utf-8")
+    paths.workspace_dir.mkdir(parents=True, exist_ok=True)
     payload = default_config_payload(paths)
     payload["telegram"]["bot_token"] = "telegram-token"
-    payload["copilot"]["cli_command"] = "copilot.cmd"
+    payload["copilot"]["cli_command"] = fake_copilot.as_posix()
     payload["copilot"]["model"] = "gpt-5"
 
     write_config(payload, paths.config_file)
@@ -118,5 +153,9 @@ def test_run_doctor_prints_extended_health_summary(tmp_path: Path, capsys: pytes
     assert "has_config=True" in captured.out
     assert "config_status=ok" in captured.out
     assert "telegram_token=set" in captured.out
-    assert "copilot_cli_command=copilot.cmd" in captured.out
+    assert f"copilot_cli_command={fake_copilot.as_posix()}" in captured.out
+    assert f"copilot_cli_resolved_command={fake_copilot.as_posix()}" in captured.out
+    assert "copilot_cli_runnable=True" in captured.out
     assert "copilot_model=gpt-5" in captured.out
+    assert "copilot_timeout_seconds=3600" in captured.out
+    assert "issues=none" in captured.out

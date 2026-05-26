@@ -49,6 +49,47 @@ class ToolCallContext:
     arguments: dict[str, object]
 
 
+@dataclass(slots=True)
+class CopilotCliDiagnostic:
+    """Copilot CLI 运行前诊断结果"""
+
+    ready: bool
+    summary: str
+    model: str
+    configured_command: str
+    resolved_command: str
+    workspace_dir: str
+    workspace_exists: bool
+    timeout_seconds: int
+    allow_all_tools: bool
+    add_workspace_dir: bool
+    reasoning_effort: str | None
+    issues: list[str] = field(default_factory=list)
+
+    def render(self, available_models: list[str] | None = None) -> str:
+        """渲染为适合 Telegram / doctor 展示的诊断文本"""
+
+        lines = [
+            f"后端状态: {self.summary}",
+            f"配置命令: {self.configured_command or '-'}",
+            f"解析命令: {self.resolved_command or '-'}",
+            f"工作区: {self.workspace_dir}（{'存在' if self.workspace_exists else '不存在'}）",
+            f"当前模型: {self.model}",
+            (
+                "调用参数: "
+                f"timeout={self.timeout_seconds}s, "
+                f"allow_all_tools={self.allow_all_tools}, "
+                f"add_workspace_dir={self.add_workspace_dir}, "
+                f"reasoning_effort={self.reasoning_effort or '-'}"
+            ),
+        ]
+        if available_models:
+            lines.append("可用模型: " + ", ".join(available_models))
+        if self.issues:
+            lines.append("待处理: " + "；".join(self.issues))
+        return "\n".join(lines)
+
+
 class AssistantPlanner:
     """将用户输入转换为 Copilot CLI 可执行计划"""
 
@@ -67,7 +108,8 @@ class AssistantPlanner:
     ) -> PlannedAction:
         """执行一次 Copilot 规划流程"""
 
-        if self._copilot_cli_ready():
+        diagnostic = self.diagnose_copilot_cli(model=model, workspace_dir=workspace_dir)
+        if diagnostic.ready:
             try:
                 return await self._plan_with_copilot_cli(
                     session_id,
@@ -82,45 +124,76 @@ class AssistantPlanner:
                 return PlannedAction(
                     action_type=ActionType.RESPOND_ONLY,
                     summary="Copilot CLI 调用失败",
-                    assistant_message=(
-                        "Copilot CLI 当前调用失败\n"
-                        f"错误: {str(exc)[:200]}\n"
-                        "请检查 copilot 登录状态与命令配置，然后重试"
-                    ),
+                    assistant_message=self._format_cli_failure_message(exc),
                 )
 
         return PlannedAction(
             action_type=ActionType.RESPOND_ONLY,
             summary="Copilot CLI 未就绪",
-            assistant_message=self.fallback_response(),
+            assistant_message=self.fallback_response(diagnostic),
         )
 
-    def fallback_response(self) -> str:
+    def fallback_response(self, diagnostic: CopilotCliDiagnostic | None = None) -> str:
         """构造 Copilot CLI 不可用时的统一提示"""
 
-        reason = self.llm_status_text()
+        current = diagnostic or self.diagnose_copilot_cli()
+        reason = current.summary
+        issue_text = "；".join(current.issues) if current.issues else "请确认 copilot 已登录，且命令可在当前环境执行"
         return (
             f"当前后端状态: {reason}\n"
-            "Copilot CLI 当前不可用，请确认 copilot 已登录，配置项 copilot.cli_command 正确"
+            f"原因: {issue_text}\n"
+            "建议: 执行 topilot doctor 检查配置，确认 copilot 登录状态与 copilot.cli_command 后重试"
         )
 
     def llm_status_text(self, model: str | None = None) -> str:
         """返回当前 Copilot CLI 状态文本"""
 
-        if self._copilot_cli_ready():
-            effective = model or self._settings.copilot_cli_model
-            return f"Copilot CLI 已启用（model={effective}）"
+        return self.diagnose_copilot_cli(model=model).summary
 
-        copilot_reasons: list[str] = []
-        if not self._settings.copilot_cli_command:
-            copilot_reasons.append("copilot.cli_command 为空")
+    def diagnose_copilot_cli(self, model: str | None = None, workspace_dir: str | None = None) -> CopilotCliDiagnostic:
+        """检查 Copilot CLI 命令、工作区和关键调用参数是否可用"""
 
-        if copilot_reasons:
-            return "Copilot 未启用(" + "; ".join(copilot_reasons) + ")"
-        return "Copilot CLI 未就绪"
+        configured = self._settings.copilot_cli_command.strip()
+        resolved = self._resolve_copilot_command() if configured else ""
+        effective_model = model or self._settings.copilot_cli_model
+        effective_workspace = self._effective_workspace(workspace_dir)
+        workspace_exists = effective_workspace.exists() and effective_workspace.is_dir()
+        issues: list[str] = []
+
+        if not configured:
+            issues.append("copilot.cli_command 为空")
+        elif not self._command_is_runnable(resolved):
+            issues.append(f"命令未找到或不可执行: {configured}")
+
+        if not workspace_exists:
+            issues.append(f"工作区不存在: {effective_workspace.as_posix()}")
+
+        if self._settings.copilot_cli_timeout_seconds <= 0:
+            issues.append("copilot.timeout_seconds 必须大于 0")
+
+        ready = not issues
+        if ready:
+            summary = f"Copilot CLI 已就绪（model={effective_model}）"
+        else:
+            summary = "Copilot CLI 未就绪（" + "；".join(issues[:2]) + "）"
+
+        return CopilotCliDiagnostic(
+            ready=ready,
+            summary=summary,
+            model=effective_model,
+            configured_command=configured,
+            resolved_command=resolved,
+            workspace_dir=effective_workspace.as_posix(),
+            workspace_exists=workspace_exists,
+            timeout_seconds=self._settings.copilot_cli_timeout_seconds,
+            allow_all_tools=self._settings.copilot_cli_allow_all_tools,
+            add_workspace_dir=self._settings.copilot_cli_add_workspace_dir,
+            reasoning_effort=self._settings.copilot_cli_reasoning_effort,
+            issues=issues,
+        )
 
     def _copilot_cli_ready(self) -> bool:
-        return bool(self._settings.copilot_cli_command)
+        return self.diagnose_copilot_cli().ready
 
     async def fetch_available_models(self) -> list[str]:
         """从 copilot --help 实时解析可用模型列表
@@ -128,6 +201,11 @@ class AssistantPlanner:
         解析 CLI 输出中 --model <model> 对应的 choices
         获取失败时返回配置中的 COPILOT_MODELS
         """
+        diagnostic = self.diagnose_copilot_cli()
+        if not diagnostic.ready:
+            logger.warning("跳过模型实时获取: %s", "; ".join(diagnostic.issues))
+            return self._fallback_available_models()
+
         try:
             argv = self._build_copilot_help_argv()
             proc = await asyncio.create_subprocess_exec(
@@ -136,6 +214,8 @@ class AssistantPlanner:
                 stderr=asyncio.subprocess.STDOUT,
             )
             raw, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+            if proc.returncode != 0:
+                raise RuntimeError(f"copilot --help exited with {proc.returncode}")
             text = raw.decode(errors="replace")
             models = self._parse_available_models_from_help(text)
             if models:
@@ -143,6 +223,11 @@ class AssistantPlanner:
                 return models
         except Exception as exc:
             logger.warning("获取模型列表失败: %s", exc)
+        return self._fallback_available_models()
+
+    def _fallback_available_models(self) -> list[str]:
+        """返回模型发现失败时的稳定回退列表"""
+
         # 回退到显式配置列表；若未配置列表，至少保留当前默认模型用于 /model 展示和切换确认。
         fallback_models = list(self._settings.copilot_available_models)
         if fallback_models:
@@ -246,18 +331,21 @@ class AssistantPlanner:
             process.kill()
             await process.wait()
             logger.error("Copilot CLI 超时 session=%s timeout=%ss", session_id, self._settings.copilot_cli_timeout_seconds)
-            raise RuntimeError("Copilot CLI 超时") from exc
+            raise RuntimeError(
+                f"Copilot CLI 超时：超过 {self._settings.copilot_cli_timeout_seconds}s 未完成，请检查网络、登录状态或调大 copilot.timeout_seconds"
+            ) from exc
 
         out_text = "\n".join(stdout_lines).strip()
         err_text = "\n".join(stderr_lines).strip()
         if process.returncode != 0:
             logger.error("Copilot CLI 返回非零 code=%s session=%s", process.returncode, session_id)
-            raise RuntimeError(err_text or out_text or f"Copilot CLI exited with {process.returncode}")
+            detail = self._shorten_single_line(err_text or out_text or "无错误输出", 200)
+            raise RuntimeError(f"Copilot CLI 返回非零退出码 {process.returncode}: {detail}")
         if not out_text and err_text:
             out_text = err_text
         if not out_text:
             logger.error("Copilot CLI 返回空结果 session=%s", session_id)
-            raise RuntimeError("Copilot CLI 返回空结果")
+            raise RuntimeError("Copilot CLI 返回空结果：stdout/stderr 均为空，请检查登录状态、命令路径和 --output-format json 支持")
 
         logger.info("Copilot CLI 调用完成 session=%s", session_id)
 
@@ -835,7 +923,7 @@ class AssistantPlanner:
         configured = self._settings.copilot_cli_command.strip()
         resolved = shutil.which(configured) if configured else None
         if resolved:
-            return resolved
+            return Path(resolved).as_posix()
         if configured and ("/" in configured or "\\" in configured):
             return configured
 
@@ -871,6 +959,36 @@ class AssistantPlanner:
         if fallback_ps1.exists():
             return fallback_ps1.as_posix()
         return configured or "copilot"
+
+    def _command_is_runnable(self, command: str) -> bool:
+        """判断解析后的命令是否能在当前系统中启动"""
+
+        if not command:
+            return False
+        if shutil.which(command):
+            return True
+        if "/" in command or "\\" in command or Path(command).is_absolute():
+            return Path(command).expanduser().exists()
+        return False
+
+    def _effective_workspace(self, workspace_dir: str | None = None) -> Path:
+        """返回本次调用实际会使用的工作区目录"""
+
+        if workspace_dir:
+            candidate = Path(workspace_dir).expanduser()
+            if candidate.exists() and candidate.is_dir():
+                return candidate.resolve()
+        return self._settings.workspace_root
+
+    def _format_cli_failure_message(self, exc: Exception) -> str:
+        """把 CLI 运行时异常压缩成稳定、可行动的用户提示"""
+
+        detail = self._shorten_single_line(str(exc) or exc.__class__.__name__, 200)
+        return (
+            "Copilot CLI 当前调用失败\n"
+            f"错误: {detail}\n"
+            "建议: 执行 topilot doctor 检查命令、登录状态、网络代理和模型配置后重试"
+        )
 
     def _normalize_prompt_for_command(self, prompt: str, command: str) -> str:
         """根据命令类型规范化 prompt

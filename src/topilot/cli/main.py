@@ -96,10 +96,22 @@ def run_doctor(app_home: Path | None = None) -> int:
     print(f"workspace_dir_exists={report.workspace_dir_exists}")
     if report.workspace_root is not None:
         print(f"workspace_root={report.workspace_root}")
+    if report.runtime_workspace_exists is not None:
+        print(f"runtime_workspace_exists={report.runtime_workspace_exists}")
     if report.copilot_cli_command is not None:
         print(f"copilot_cli_command={report.copilot_cli_command}")
+    if report.copilot_cli_resolved_command is not None:
+        print(f"copilot_cli_resolved_command={report.copilot_cli_resolved_command}")
+    if report.copilot_cli_runnable is not None:
+        print(f"copilot_cli_runnable={report.copilot_cli_runnable}")
     if report.copilot_model is not None:
         print(f"copilot_model={report.copilot_model}")
+    if report.copilot_timeout_seconds is not None:
+        print(f"copilot_timeout_seconds={report.copilot_timeout_seconds}")
+    if report.issues:
+        print("issues=" + "；".join(report.issues))
+    else:
+        print("issues=none")
     return 0
 
 

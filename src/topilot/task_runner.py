@@ -305,6 +305,13 @@ class TaskRunner:
         model = self._sessions.active_model(chat_id) if chat_id is not None else None
         return self._planner.llm_status_text(model)
 
+    def llm_diagnostic_text(self, chat_id: int | None = None) -> str:
+        """返回 LLM 后端详细诊断文本"""
+
+        model = self._sessions.active_model(chat_id) if chat_id is not None else None
+        diagnostic = self._planner.diagnose_copilot_cli(model=model)
+        return diagnostic.render(available_models=self._cached_models)
+
     def current_model(self, chat_id: int) -> str:
         """返回当前 chat 有效的模型"""
         return self._sessions.active_model(chat_id) or self._settings.copilot_cli_model

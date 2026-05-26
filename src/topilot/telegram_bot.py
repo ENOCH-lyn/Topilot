@@ -453,7 +453,7 @@ def build_application(settings: Settings) -> Application:
     async def llm_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
             return
-        await update.effective_message.reply_text(f"后端状态: {runner.llm_status_text(update.effective_chat.id)}")
+        await update.effective_message.reply_text(runner.llm_diagnostic_text(update.effective_chat.id))
 
     async def session_current_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:

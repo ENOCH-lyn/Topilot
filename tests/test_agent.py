@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from topilot.agent import AssistantPlanner, StreamState
 
@@ -123,3 +124,157 @@ def test_parse_available_models_from_help_deduplicates_choices(make_settings) ->
     """
 
     assert planner._parse_available_models_from_help(help_text) == ["gpt-5-mini", "gpt-5"]
+
+
+def test_diagnose_copilot_cli_reports_missing_command_and_workspace(make_settings, tmp_path: Path) -> None:
+    missing_command = tmp_path / "missing" / "copilot.cmd"
+    missing_workspace = tmp_path / "missing-workspace"
+    planner = AssistantPlanner(
+        make_settings(
+            copilot_cli_command=missing_command.as_posix(),
+            workspace_root=missing_workspace,
+        )
+    )
+
+    diagnostic = planner.diagnose_copilot_cli()
+    rendered = diagnostic.render(available_models=["gpt-5-mini"])
+
+    assert diagnostic.ready is False
+    assert f"命令未找到或不可执行: {missing_command.as_posix()}" in diagnostic.issues
+    assert f"工作区不存在: {missing_workspace.as_posix()}" in diagnostic.issues
+    assert "后端状态: Copilot CLI 未就绪" in rendered
+    assert "可用模型: gpt-5-mini" in rendered
+    assert "待处理:" in rendered
+
+
+def test_diagnose_copilot_cli_ready_includes_runtime_fields(make_settings, tmp_path: Path) -> None:
+    fake_copilot = tmp_path / "copilot.cmd"
+    fake_copilot.write_text("@echo off\n", encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    planner = AssistantPlanner(
+        make_settings(
+            copilot_cli_command=fake_copilot.as_posix(),
+            workspace_root=workspace,
+            copilot_cli_timeout_seconds=42,
+            copilot_cli_allow_all_tools=False,
+            copilot_cli_add_workspace_dir=False,
+            copilot_cli_reasoning_effort="high",
+        )
+    )
+
+    diagnostic = planner.diagnose_copilot_cli(model="gpt-5")
+    rendered = diagnostic.render()
+
+    assert diagnostic.ready is True
+    assert diagnostic.summary == "Copilot CLI 已就绪（model=gpt-5）"
+    assert f"解析命令: {fake_copilot.as_posix()}" in rendered
+    assert "调用参数: timeout=42s, allow_all_tools=False, add_workspace_dir=False, reasoning_effort=high" in rendered
+
+
+def test_plan_returns_clear_message_when_copilot_cli_is_not_ready(make_settings, tmp_path: Path) -> None:
+    missing_command = tmp_path / "missing-copilot.cmd"
+    planner = AssistantPlanner(make_settings(copilot_cli_command=missing_command.as_posix()))
+
+    plan = asyncio.run(planner.plan("session-1", [], "hello"))
+
+    assert plan.summary == "Copilot CLI 未就绪"
+    assert "当前后端状态: Copilot CLI 未就绪" in plan.assistant_message
+    assert f"命令未找到或不可执行: {missing_command.as_posix()}" in plan.assistant_message
+    assert "topilot doctor" in plan.assistant_message
+
+
+class FakePipe:
+    def __init__(self, lines: list[bytes] | None = None, block_forever: bool = False) -> None:
+        self._lines = list(lines or [])
+        self._block_forever = block_forever
+
+    async def readline(self) -> bytes:
+        if self._lines:
+            return self._lines.pop(0)
+        if self._block_forever:
+            await asyncio.sleep(3600)
+        return b""
+
+
+class FakeProcess:
+    def __init__(
+        self,
+        stdout_lines: list[bytes] | None = None,
+        stderr_lines: list[bytes] | None = None,
+        returncode: int = 0,
+        block_forever: bool = False,
+    ) -> None:
+        self.stdout = FakePipe(stdout_lines, block_forever=block_forever)
+        self.stderr = FakePipe(stderr_lines, block_forever=block_forever)
+        self.returncode = returncode
+        self.killed = False
+        self._block_forever = block_forever
+
+    async def wait(self) -> int:
+        if self._block_forever and not self.killed:
+            await asyncio.sleep(3600)
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = -9
+
+
+def test_plan_reports_nonzero_copilot_exit_code(make_settings, monkeypatch, tmp_path: Path) -> None:
+    fake_copilot = tmp_path / "copilot.cmd"
+    fake_copilot.write_text("@echo off\n", encoding="utf-8")
+    planner = AssistantPlanner(make_settings(copilot_cli_command=fake_copilot.as_posix()))
+
+    async def _fake_exec(*args, **kwargs) -> FakeProcess:
+        return FakeProcess(stderr_lines=[b"authentication failed\n"], returncode=2)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+    plan = asyncio.run(planner.plan("session-1", [], "hello"))
+
+    assert plan.summary == "Copilot CLI 调用失败"
+    assert "非零退出码 2" in plan.assistant_message
+    assert "authentication failed" in plan.assistant_message
+    assert "topilot doctor" in plan.assistant_message
+
+
+def test_plan_reports_empty_copilot_output(make_settings, monkeypatch, tmp_path: Path) -> None:
+    fake_copilot = tmp_path / "copilot.cmd"
+    fake_copilot.write_text("@echo off\n", encoding="utf-8")
+    planner = AssistantPlanner(make_settings(copilot_cli_command=fake_copilot.as_posix()))
+
+    async def _fake_exec(*args, **kwargs) -> FakeProcess:
+        return FakeProcess(returncode=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+    plan = asyncio.run(planner.plan("session-1", [], "hello"))
+
+    assert plan.summary == "Copilot CLI 调用失败"
+    assert "Copilot CLI 返回空结果" in plan.assistant_message
+    assert "--output-format json" in plan.assistant_message
+
+
+def test_plan_reports_copilot_timeout(make_settings, monkeypatch, tmp_path: Path) -> None:
+    fake_copilot = tmp_path / "copilot.cmd"
+    fake_copilot.write_text("@echo off\n", encoding="utf-8")
+    process = FakeProcess(returncode=0, block_forever=True)
+    planner = AssistantPlanner(
+        make_settings(
+            copilot_cli_command=fake_copilot.as_posix(),
+            copilot_cli_timeout_seconds=0.01,
+        )
+    )
+
+    async def _fake_exec(*args, **kwargs) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+
+    plan = asyncio.run(planner.plan("session-1", [], "hello"))
+
+    assert process.killed is True
+    assert plan.summary == "Copilot CLI 调用失败"
+    assert "Copilot CLI 超时" in plan.assistant_message
+    assert "0.01s" in plan.assistant_message

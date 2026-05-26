@@ -66,8 +66,10 @@ def test_session_store_requires_unique_prefix_when_switching(tmp_path: Path) -> 
     assert store.active_session(100) == first
 
 
-def test_task_runner_status_text_includes_model_source_workspace_and_state(make_settings) -> None:
-    settings = make_settings()
+def test_task_runner_status_text_includes_model_source_workspace_and_state(make_settings, tmp_path: Path) -> None:
+    fake_copilot = tmp_path / "copilot.cmd"
+    fake_copilot.write_text("@echo off\n", encoding="utf-8")
+    settings = make_settings(copilot_cli_command=fake_copilot.as_posix())
 
     async def _send_message(chat_id: int, text: str) -> None:
         return None
@@ -88,7 +90,7 @@ def test_task_runner_status_text_includes_model_source_workspace_and_state(make_
 
     text = runner.status_text(100)
 
-    assert "后端状态: Copilot CLI 已启用（model=gpt-5）" in text
+    assert "后端状态: Copilot CLI 已就绪（model=gpt-5）" in text
     assert f"当前会话: {session_id}" in text
     assert "会话标题: daily-work" in text
     assert "会话来源: local" in text
@@ -96,6 +98,27 @@ def test_task_runner_status_text_includes_model_source_workspace_and_state(make_
     assert "当前模型: gpt-5" in text
     assert "工作区: C:/workspace/project-a" in text
     assert "最近活动: 2026-05-05T10:20:30Z" in text
+
+
+def test_task_runner_llm_diagnostic_text_exposes_backend_health(make_settings, tmp_path: Path) -> None:
+    fake_copilot = tmp_path / "copilot.cmd"
+    fake_copilot.write_text("@echo off\n", encoding="utf-8")
+    settings = make_settings(copilot_cli_command=fake_copilot.as_posix())
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    runner = TaskRunner(settings, _send_message)
+    runner._cached_models = ["gpt-5-mini", "gpt-5"]
+    runner._sessions.set_model(100, "gpt-5")
+
+    text = runner.llm_diagnostic_text(100)
+
+    assert "后端状态: Copilot CLI 已就绪（model=gpt-5）" in text
+    assert f"配置命令: {fake_copilot.as_posix()}" in text
+    assert f"解析命令: {fake_copilot.as_posix()}" in text
+    assert "可用模型: gpt-5-mini, gpt-5" in text
+    assert "待处理:" not in text
 
 
 def test_task_runner_session_current_text_includes_brief_session_summary(make_settings) -> None:
