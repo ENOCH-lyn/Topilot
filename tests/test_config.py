@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from topilot.cli.main import run_doctor
+from topilot.cli.main import run_doctor, run_init
 from topilot.config import (
     ConfigurationError,
     default_config_payload,
@@ -13,6 +13,63 @@ from topilot.config import (
     write_config,
 )
 from topilot.paths import build_app_paths
+
+
+def test_run_init_force_writes_interactive_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    home = tmp_path / "app-home"
+    workspace = tmp_path / "workspace-from-input"
+    answers = iter(
+        [
+            "telegram-token",
+            "1001, 1002",
+            "",
+            "copilot.cmd",
+            "gpt-5",
+            workspace.as_posix(),
+            "3.5",
+            "",
+        ]
+    )
+
+    monkeypatch.setattr("topilot.cli.main.build_app_paths", lambda: build_app_paths(home))
+    monkeypatch.setattr("builtins.input", lambda prompt: next(answers))
+
+    code = run_init(force=True)
+    captured = capsys.readouterr()
+    settings = load_settings(home)
+
+    assert code == 0
+    assert f"配置已写入: {build_app_paths(home).config_file}" in captured.out
+    assert settings.telegram_bot_token == "telegram-token"
+    assert settings.allowed_chat_ids == {1001, 1002}
+    assert settings.telegram_proxy_url is None
+    assert settings.copilot_cli_command == "copilot.cmd"
+    assert settings.copilot_cli_model == "gpt-5"
+    assert settings.workspace_root == workspace.resolve()
+    assert settings.session_watch_interval_seconds == 3.5
+    assert settings.copilot_cli_add_workspace_dir is True
+
+
+def test_run_init_without_force_keeps_existing_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    paths = build_app_paths(tmp_path / "app")
+    payload = default_config_payload(paths)
+    payload["telegram"]["bot_token"] = "existing-token"
+    write_config(payload, paths.config_file)
+
+    def _unexpected_input(prompt: str) -> str:
+        raise AssertionError("run_init should not prompt when config exists and force=False")
+
+    monkeypatch.setattr("topilot.cli.main.build_app_paths", lambda: paths)
+    monkeypatch.setattr("builtins.input", _unexpected_input)
+
+    code = run_init(force=False)
+    captured = capsys.readouterr()
+    settings = load_settings(paths.home_dir)
+
+    assert code == 0
+    assert f"配置已存在: {paths.config_file}" in captured.out
+    assert "topilot init --force" in captured.out
+    assert settings.telegram_bot_token == "existing-token"
 
 
 def test_write_config_creates_backup_when_content_changes(tmp_path: Path) -> None:

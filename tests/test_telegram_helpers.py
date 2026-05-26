@@ -4,7 +4,21 @@ import asyncio
 
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 
-from topilot.telegram_bot import _build_model_keyboard, _chunk_text, _is_allowed, _render_session_menu, _trim_telegram_text, restricted
+from topilot.telegram_bot import (
+    _build_model_keyboard,
+    _callback_page,
+    _callback_payload,
+    _chunk_text,
+    _is_allowed,
+    _normalize_model_list,
+    _render_model_menu,
+    _render_session_delete_confirm,
+    _render_session_detail,
+    _render_session_history,
+    _render_session_menu,
+    _trim_telegram_text,
+    restricted,
+)
 
 
 class FakeChat:
@@ -34,6 +48,18 @@ def test_model_keyboard_marks_current_model_and_uses_two_columns() -> None:
     assert len(keyboard[0]) == 2
     assert keyboard[0][1].text == "✓ gpt-5"
     assert keyboard[1][0].text == "claude"
+
+
+def test_model_menu_deduplicates_models_and_keeps_callback_values() -> None:
+    text, keyboard = _render_model_menu(["gpt-5", " ", "gpt-5-mini", "gpt-5"], "gpt-5-mini")
+
+    assert text == "当前模型: gpt-5-mini\n请选择模型:"
+    assert _normalize_model_list(["gpt-5", "", "gpt-5-mini", "gpt-5"]) == ["gpt-5", "gpt-5-mini"]
+    assert len(keyboard) == 1
+    assert keyboard[0][0].text == "gpt-5"
+    assert keyboard[0][0].callback_data == "model_sel:gpt-5"
+    assert keyboard[0][1].text == "✓ gpt-5-mini"
+    assert keyboard[0][1].callback_data == "model_sel:gpt-5-mini"
 
 
 def test_chunk_and_trim_helpers_keep_telegram_safe_lengths() -> None:
@@ -75,6 +101,75 @@ def test_render_session_menu_shows_active_and_running_marks() -> None:
     assert "⚪ fedcba65 | docs | gpt-5 | saved" in text
     assert keyboard[0][0].callback_data == "sopen:abcdef123456"
     assert keyboard[0][0].text == "打开 abcdef12 mobile checkout bu..."
+
+
+def test_render_session_menu_paginates_and_clamps_page_bounds() -> None:
+    items = [
+        {
+            "id": f"session-{index:02d}",
+            "title": f"title-{index}",
+            "model": "gpt-5-mini",
+            "source": "saved",
+            "running": False,
+            "active": False,
+        }
+        for index in range(8)
+    ]
+
+    first_text, first_keyboard = _render_session_menu(items, page=-2, page_size=3)
+    last_text, last_keyboard = _render_session_menu(items, page=99, page_size=3)
+
+    assert first_text.startswith("会话管理 第 1/3 页")
+    assert first_keyboard[-1][0].text == "刷新"
+    assert first_keyboard[-1][0].callback_data == "smenu:0"
+    assert first_keyboard[-1][1].text == "下一页"
+    assert first_keyboard[-1][1].callback_data == "smenu:1"
+    assert last_text.startswith("会话管理 第 3/3 页")
+    assert last_keyboard[-1][0].text == "上一页"
+    assert last_keyboard[-1][0].callback_data == "smenu:1"
+    assert last_keyboard[-1][1].text == "刷新"
+    assert last_keyboard[-1][1].callback_data == "smenu:2"
+
+
+def test_render_session_detail_history_and_delete_confirm_buttons() -> None:
+    detail_text, detail_keyboard = _render_session_detail(
+        "会话: session-123\n状态: 空闲",
+        "session-123",
+        prefix="已刷新",
+    )
+    history_text, history_keyboard = _render_session_history("最近历史:\n- hello", "session-123")
+    delete_text, delete_keyboard = _render_session_delete_confirm("会话: session-123\n状态: 空闲", "session-123")
+
+    assert detail_text.startswith("已刷新\n\n会话: session-123")
+    assert [row[0].callback_data for row in detail_keyboard] == [
+        "suse:session-123",
+        "shis:session-123",
+        "sopen:session-123",
+        "sdel:session-123",
+        "smenu:0",
+    ]
+    assert history_text == "最近历史:\n- hello"
+    assert [row[0].callback_data for row in history_keyboard] == [
+        "shis:session-123",
+        "sopen:session-123",
+        "smenu:0",
+    ]
+    assert delete_text.startswith("确认删除该会话？\n\n会话: session-123")
+    assert [row[0].callback_data for row in delete_keyboard] == [
+        "sdelok:session-123",
+        "sopen:session-123",
+        "smenu:0",
+    ]
+
+
+def test_callback_payload_and_page_parsing_are_safe() -> None:
+    assert _callback_payload("sopen:session-123", "sopen:") == "session-123"
+    assert _callback_payload("sopen:  session-123  ", "sopen:") == "session-123"
+    assert _callback_payload("shis:session-123", "sopen:") == ""
+    assert _callback_page("smenu:2") == 2
+    assert _callback_page("smenu:-1") == 0
+    assert _callback_page("smenu:not-a-number") == 0
+    assert _callback_page("sopen:1") == 0
 
 
 def test_is_allowed_respects_empty_allowlist_and_explicit_chat_ids(make_settings) -> None:

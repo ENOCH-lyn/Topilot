@@ -495,16 +495,13 @@ def build_application(settings: Settings) -> Application:
         if not update.effective_message or not update.effective_chat:
             return
         chat_id = update.effective_chat.id
-        models = runner.list_models()
+        models = _normalize_model_list(runner.list_models())
         if not models:
             await update.effective_message.reply_text("暂时无法获取可用模型列表，当前无法修改模型")
             return
         current = runner.current_model(chat_id)
-        keyboard = _build_model_keyboard(models, current)
-        await update.effective_message.reply_text(
-            f"当前模型: {current}\n请选择模型:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+        text, keyboard = _render_model_menu(models, current)
+        await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def model_select_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """处理模型选择按钮回调"""
@@ -515,11 +512,11 @@ def build_application(settings: Settings) -> Application:
         if not chat_id or not _is_allowed(settings, chat_id):
             await query.answer("未授权", show_alert=True)
             return
-        model = query.data[len("model_sel:"):]
+        model = _callback_payload(query.data, "model_sel:")
         if not model:
             await query.answer()
             return
-        if model not in runner.list_models():
+        if model not in _normalize_model_list(runner.list_models()):
             await query.answer("模型不存在", show_alert=True)
             return
         runner.set_model(chat_id, model)
@@ -542,18 +539,16 @@ def build_application(settings: Settings) -> Application:
         await query.answer()
 
         if data.startswith("smenu:"):
-            page_text = data.split(":", 1)[1]
-            page = int(page_text) if page_text.isdigit() else 0
-            await _edit_session_menu(query, chat_id, page=page)
+            await _edit_session_menu(query, chat_id, page=_callback_page(data))
             return
 
         if data.startswith("sopen:"):
-            sid = data.split(":", 1)[1]
+            sid = _callback_payload(data, "sopen:")
             await _edit_session_detail(query, chat_id, sid)
             return
 
         if data.startswith("suse:"):
-            sid = data.split(":", 1)[1]
+            sid = _callback_payload(data, "suse:")
             text = runner.takeover_session(chat_id, sid)
             try:
                 await query.edit_message_text(f"✓ {text}")
@@ -569,25 +564,20 @@ def build_application(settings: Settings) -> Application:
             return
 
         if data.startswith("shis:"):
-            sid = data.split(":", 1)[1]
+            sid = _callback_payload(data, "shis:")
             history_text = runner.session_history_text(chat_id, sid)
-            keyboard = InlineKeyboardMarkup(
-                [
-                    [InlineKeyboardButton("刷新历史", callback_data=f"shis:{sid}")],
-                    [InlineKeyboardButton("返回详情", callback_data=f"sopen:{sid}")],
-                    [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
-                ]
-            )
+            _, keyboard_buttons = _render_session_history(history_text, sid)
+            keyboard = InlineKeyboardMarkup(keyboard_buttons)
             await query.edit_message_text(history_text, reply_markup=keyboard)
             return
 
         if data.startswith("sdel:"):
-            sid = data.split(":", 1)[1]
+            sid = _callback_payload(data, "sdel:")
             await _edit_session_delete_confirm(query, chat_id, sid)
             return
 
         if data.startswith("sdelok:"):
-            sid = data.split(":", 1)[1]
+            sid = _callback_payload(data, "sdelok:")
             text = runner.delete_session(chat_id, sid, delete_local=True)
             await _edit_session_menu(query, chat_id, page=0, prefix=text)
             return
@@ -605,30 +595,13 @@ def build_application(settings: Settings) -> Application:
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def _edit_session_detail(query, chat_id: int, session_id: str, prefix: str | None = None) -> None:
-        text = runner.session_detail_text(chat_id, session_id)
-        if prefix:
-            text = f"{prefix}\n\n{text}"
-        keyboard = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("接管会话", callback_data=f"suse:{session_id}")],
-                [InlineKeyboardButton("查看历史", callback_data=f"shis:{session_id}")],
-                [InlineKeyboardButton("刷新详情", callback_data=f"sopen:{session_id}")],
-                [InlineKeyboardButton("删除会话", callback_data=f"sdel:{session_id}")],
-                [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
-            ]
-        )
+        text, keyboard_buttons = _render_session_detail(runner.session_detail_text(chat_id, session_id), session_id, prefix=prefix)
+        keyboard = InlineKeyboardMarkup(keyboard_buttons)
         await query.edit_message_text(text, reply_markup=keyboard)
 
     async def _edit_session_delete_confirm(query, chat_id: int, session_id: str) -> None:
-        text = runner.session_detail_text(chat_id, session_id)
-        keyboard = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("确认删除", callback_data=f"sdelok:{session_id}")],
-                [InlineKeyboardButton("取消", callback_data=f"sopen:{session_id}")],
-                [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
-            ]
-        )
-        await query.edit_message_text(f"确认删除该会话？\n\n{text}", reply_markup=keyboard)
+        text, keyboard_buttons = _render_session_delete_confirm(runner.session_detail_text(chat_id, session_id), session_id)
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard_buttons))
 
     async def _stop_session_watch(chat_id: int) -> None:
         task = session_watch_tasks.pop(chat_id, None)
@@ -724,7 +697,7 @@ def _build_model_keyboard(models: list[str], current: str) -> list[list[InlineKe
     """构建模型选择内联键盘（2列布局，当前模型标 ✓）"""
     keyboard: list[list[InlineKeyboardButton]] = []
     row: list[InlineKeyboardButton] = []
-    for model in models:
+    for model in _normalize_model_list(models):
         label = f"✓ {model}" if model == current else model
         row.append(InlineKeyboardButton(label, callback_data=f"model_sel:{model}"))
         if len(row) == 2:
@@ -733,6 +706,27 @@ def _build_model_keyboard(models: list[str], current: str) -> list[list[InlineKe
     if row:
         keyboard.append(row)
     return keyboard
+
+
+def _render_model_menu(models: list[str], current: str) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    """渲染模型选择文本和按钮"""
+
+    normalized = _normalize_model_list(models)
+    return f"当前模型: {current}\n请选择模型:", _build_model_keyboard(normalized, current)
+
+
+def _normalize_model_list(models: list[str]) -> list[str]:
+    """去重并清理模型列表，保证按钮和合法性校验口径一致"""
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for model in models:
+        trimmed = str(model).strip()
+        if not trimmed or trimmed in seen:
+            continue
+        seen.add(trimmed)
+        result.append(trimmed)
+    return result
 
 
 def _trim_telegram_text(text: str, limit: int = 3500) -> str:
@@ -774,6 +768,59 @@ def _render_session_menu(items: list[dict], page: int, page_size: int = 6) -> tu
     keyboard.append(nav)
 
     return "\n".join(lines), keyboard
+
+
+def _render_session_detail(detail_text: str, session_id: str, prefix: str | None = None) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    """渲染会话详情页文本和按钮"""
+
+    text = detail_text
+    if prefix:
+        text = f"{prefix}\n\n{text}"
+    keyboard = [
+        [InlineKeyboardButton("接管会话", callback_data=f"suse:{session_id}")],
+        [InlineKeyboardButton("查看历史", callback_data=f"shis:{session_id}")],
+        [InlineKeyboardButton("刷新详情", callback_data=f"sopen:{session_id}")],
+        [InlineKeyboardButton("删除会话", callback_data=f"sdel:{session_id}")],
+        [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
+    ]
+    return text, keyboard
+
+
+def _render_session_history(history_text: str, session_id: str) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    """渲染会话历史页文本和按钮"""
+
+    keyboard = [
+        [InlineKeyboardButton("刷新历史", callback_data=f"shis:{session_id}")],
+        [InlineKeyboardButton("返回详情", callback_data=f"sopen:{session_id}")],
+        [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
+    ]
+    return history_text, keyboard
+
+
+def _render_session_delete_confirm(detail_text: str, session_id: str) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    """渲染删除确认页，避免误触直接删除"""
+
+    keyboard = [
+        [InlineKeyboardButton("确认删除", callback_data=f"sdelok:{session_id}")],
+        [InlineKeyboardButton("取消", callback_data=f"sopen:{session_id}")],
+        [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
+    ]
+    return f"确认删除该会话？\n\n{detail_text}", keyboard
+
+
+def _callback_payload(data: str, prefix: str) -> str:
+    """从回调数据中提取 payload"""
+
+    return data[len(prefix):].strip() if data.startswith(prefix) else ""
+
+
+def _callback_page(data: str) -> int:
+    """解析会话菜单页码，非法或负数统一回到第 0 页"""
+
+    page_text = _callback_payload(data, "smenu:")
+    if not page_text.isdigit():
+        return 0
+    return max(0, int(page_text))
 
 
 def _shorten_menu_text(text: str, limit: int) -> str:

@@ -50,6 +50,8 @@
 1. 使用 `restricted()` 装饰器统一做权限校验，降低 handler 重复代码。
 2. 使用 `TelegramLiveProgress` 承担所有流式消息编辑和限频逻辑。
 3. 使用按钮回调数据前缀区分菜单类型，如 `model_sel:`、`smenu:`、`sopen:`、`suse:`、`shis:`、`sdel:`、`sdelok:`。
+4. 模型菜单、会话详情、会话历史、删除确认页均使用独立渲染函数生成文本和按钮，避免回调分支中散落重复 UI 结构。
+5. 回调 payload 和页码统一通过 `_callback_payload()`、`_callback_page()` 解析，非法页码或负数统一回到第 0 页。
 
 ### 2.4 任务编排模块
 
@@ -269,7 +271,7 @@
 1. 通过 `_build_copilot_help_argv()` 构造帮助命令，普通可执行文件使用 `<command> --help`，`.ps1` 入口使用 PowerShell `-File <command> --help` 包装。
 2. 若 Copilot CLI 诊断未就绪，则跳过实时探测，避免启动必然失败的子进程。
 3. 启动子进程读取帮助输出，并使用正则定位 `--model <model>` 的 choices 段。
-4. 解析引号包裹的模型名称，并去重保留原顺序。
+4. 解析引号包裹的模型名称，并去重保留原顺序；Telegram 按钮展示前再次通过 `_normalize_model_list()` 清理空值与重复项，保证按钮展示和合法性校验口径一致。
 5. 若实时解析失败，则回退到配置中的 `available_models`。
 6. 若配置回退列表为空，则至少返回当前默认模型，保证 `/model` 不因空列表失效。
 
@@ -300,6 +302,15 @@
 4. 若已保存会话无匹配，则刷新本机 `session-state` 会话列表并查找前缀。
 5. 若本机会话唯一匹配，则执行接管；若多个匹配，则返回歧义提示，要求输入更长前缀。
 
+### 5.7 Telegram 回调渲染算法
+1. `/model` 命令先读取运行期模型缓存，再用 `_normalize_model_list()` 去除空值和重复值。
+2. `_render_model_menu()` 生成“当前模型 + 请选择模型”的文本和两列模型按钮；当前模型按钮带 `✓` 标识。
+3. `/sessions` 与 `smenu:` 回调共用 `_render_session_menu()`，页码先通过 `_callback_page()` 清洗，再按 `page_size` 切片；小于 0、非数字或超过最大页时自动夹到合法范围。
+4. `sopen:` 回调用 `_render_session_detail()` 生成“接管会话、查看历史、刷新详情、删除会话、返回列表”按钮。
+5. `shis:` 回调用 `_render_session_history()` 生成“刷新历史、返回详情、返回列表”按钮。
+6. `sdel:` 回调用 `_render_session_delete_confirm()` 生成“确认删除、取消、返回列表”按钮，确保删除操作必须二次确认。
+7. `model_sel:`、`sopen:`、`suse:`、`shis:`、`sdel:`、`sdelok:` 的 payload 均通过 `_callback_payload()` 提取并去除首尾空白。
+
 ## 6. 异常处理方案
 
 | 场景 | 处理策略 |
@@ -313,6 +324,8 @@
 | Copilot CLI 返回非零退出码 | 返回退出码和 stderr/out 的 200 字符内摘要 |
 | Copilot CLI 返回空输出 | 返回“stdout/stderr 均为空”的明确提示，并提示检查登录、命令路径和 `--output-format json` 支持 |
 | Telegram HTML 解析失败 | 自动回退为纯文本过程消息 |
+| Telegram 回调页码非法 | 回退到第 0 页，不抛出异常 |
+| 模型列表包含空值或重复值 | 渲染前去重清理，合法性校验使用同一清理结果 |
 | 会话目录不存在 | 返回“会话不存在或已被删除” |
 | 会话 ID 前缀匹配多个会话 | 返回“会话前缀不唯一”，要求提供更长前缀 |
 
