@@ -98,14 +98,15 @@ topilot start
 ## Bot 可用命令
 
 - `/whoami`：查看当前 chat/user 信息
-- `/llm`：查看 Copilot 后端诊断报告，包括命令、解析路径、工作区、模型、调用参数和待处理问题
 - `/session_current`：查看当前会话 ID 与简要摘要
 - `/sessions`：会话管理入口（列表/接管/历史/删除）
 - `/session_new [title]`：新建并切换到会话
 - `/session_use <session_id前缀>`：按唯一前缀切换已保存会话，或接管本机发现的唯一匹配会话；前缀不唯一时会拒绝切换
 - `/model`：查看/切换当前模型
-- `/status`：查看后端状态、当前会话、来源、状态、模型和工作区摘要
+- `/status`：查看后端状态、当前会话、来源、状态、模型和工作区摘要，并可通过按钮打开后端诊断报告
 - 直接发送文本将进入对话
+
+Bot 启动时会自动向 Telegram 注册命令菜单；`/start`、`/help`、`/status`、`/model`、`/sessions`、`/session_current` 等入口也提供内联按钮，常用操作可直接点击完成。
 
 ## 当前完成范围
 

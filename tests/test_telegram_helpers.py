@@ -5,17 +5,22 @@ import asyncio
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 
 from topilot.telegram_bot import (
+    _bot_commands,
     _build_model_keyboard,
     _callback_page,
     _callback_payload,
     _chunk_text,
     _is_allowed,
     _normalize_model_list,
+    _render_diagnostic_panel,
+    _render_main_menu,
     _render_model_menu,
+    _render_session_current_panel,
     _render_session_delete_confirm,
     _render_session_detail,
     _render_session_history,
     _render_session_menu,
+    _render_status_panel,
     _trim_telegram_text,
     restricted,
 )
@@ -55,11 +60,37 @@ def test_model_menu_deduplicates_models_and_keeps_callback_values() -> None:
 
     assert text == "当前模型: gpt-5-mini\n请选择模型:"
     assert _normalize_model_list(["gpt-5", "", "gpt-5-mini", "gpt-5"]) == ["gpt-5", "gpt-5-mini"]
-    assert len(keyboard) == 1
+    assert len(keyboard) == 3
     assert keyboard[0][0].text == "gpt-5"
     assert keyboard[0][0].callback_data == "model_sel:gpt-5"
     assert keyboard[0][1].text == "✓ gpt-5-mini"
     assert keyboard[0][1].callback_data == "model_sel:gpt-5-mini"
+    assert [button.callback_data for button in keyboard[1]] == ["nav:status", "nav:sessions"]
+    assert keyboard[2][0].callback_data == "nav:main"
+
+
+def test_main_status_and_diagnostic_panels_have_navigation_buttons() -> None:
+    main_text, main_keyboard = _render_main_menu()
+    status_text, status_keyboard = _render_status_panel("后端状态: ready")
+    diagnostic_text, diagnostic_keyboard = _render_diagnostic_panel("配置命令: copilot")
+    current_text, current_keyboard = _render_session_current_panel("当前 Copilot 会话: abc")
+
+    assert main_text.startswith("Topilot 主菜单")
+    assert [button.callback_data for row in main_keyboard for button in row] == [
+        "nav:status",
+        "nav:model",
+        "nav:sessions",
+        "nav:session_current",
+        "nav:session_new",
+        "nav:whoami",
+    ]
+    assert status_text == "后端状态: ready"
+    assert status_keyboard[0][0].callback_data == "nav:diagnostic"
+    assert status_keyboard[-1][0].callback_data == "nav:main"
+    assert diagnostic_text == "配置命令: copilot"
+    assert diagnostic_keyboard[0][0].callback_data == "nav:diagnostic"
+    assert current_text == "当前 Copilot 会话: abc"
+    assert current_keyboard[0][0].callback_data == "nav:sessions"
 
 
 def test_chunk_and_trim_helpers_keep_telegram_safe_lengths() -> None:
@@ -118,17 +149,21 @@ def test_render_session_menu_paginates_and_clamps_page_bounds() -> None:
 
     first_text, first_keyboard = _render_session_menu(items, page=-2, page_size=3)
     last_text, last_keyboard = _render_session_menu(items, page=99, page_size=3)
+    first_nav = next(row for row in first_keyboard if row[0].callback_data.startswith("smenu:"))
+    last_nav = next(row for row in last_keyboard if row[0].callback_data.startswith("smenu:"))
 
     assert first_text.startswith("会话管理 第 1/3 页")
-    assert first_keyboard[-1][0].text == "刷新"
-    assert first_keyboard[-1][0].callback_data == "smenu:0"
-    assert first_keyboard[-1][1].text == "下一页"
-    assert first_keyboard[-1][1].callback_data == "smenu:1"
+    assert first_nav[0].text == "刷新"
+    assert first_nav[0].callback_data == "smenu:0"
+    assert first_nav[1].text == "下一页"
+    assert first_nav[1].callback_data == "smenu:1"
+    assert first_keyboard[-2][0].callback_data == "nav:session_new"
+    assert first_keyboard[-1][0].callback_data == "nav:main"
     assert last_text.startswith("会话管理 第 3/3 页")
-    assert last_keyboard[-1][0].text == "上一页"
-    assert last_keyboard[-1][0].callback_data == "smenu:1"
-    assert last_keyboard[-1][1].text == "刷新"
-    assert last_keyboard[-1][1].callback_data == "smenu:2"
+    assert last_nav[0].text == "上一页"
+    assert last_nav[0].callback_data == "smenu:1"
+    assert last_nav[1].text == "刷新"
+    assert last_nav[1].callback_data == "smenu:2"
 
 
 def test_render_session_detail_history_and_delete_confirm_buttons() -> None:
@@ -147,18 +182,21 @@ def test_render_session_detail_history_and_delete_confirm_buttons() -> None:
         "sopen:session-123",
         "sdel:session-123",
         "smenu:0",
+        "nav:main",
     ]
     assert history_text == "最近历史:\n- hello"
     assert [row[0].callback_data for row in history_keyboard] == [
         "shis:session-123",
         "sopen:session-123",
         "smenu:0",
+        "nav:main",
     ]
     assert delete_text.startswith("确认删除该会话？\n\n会话: session-123")
     assert [row[0].callback_data for row in delete_keyboard] == [
         "sdelok:session-123",
         "sopen:session-123",
         "smenu:0",
+        "nav:main",
     ]
 
 
@@ -229,7 +267,6 @@ def test_build_application_registers_required_commands_callbacks_and_text_handle
 
     assert commands == {
         "whoami",
-        "llm",
         "session_current",
         "sessions",
         "session_new",
@@ -247,6 +284,7 @@ def test_build_application_registers_required_commands_callbacks_and_text_handle
     ]
     assert callback_patterns == [
         "^model_sel:",
+        "^nav:",
         r"^(smenu:|sopen:|suse:|shis:|sdel:|sdelok:)",
     ]
 
@@ -260,3 +298,20 @@ def test_build_application_registers_required_commands_callbacks_and_text_handle
     assert callbacks_by_command["whoami"].endswith("whoami_command")
     for command in commands - {"whoami"}:
         assert callbacks_by_command[command].endswith("restricted.<locals>.wrapped")
+
+
+def test_bot_commands_registered_for_telegram_menu_match_public_commands() -> None:
+    commands = [item.command for item in _bot_commands()]
+
+    assert commands == [
+        "start",
+        "help",
+        "status",
+        "model",
+        "sessions",
+        "session_current",
+        "session_new",
+        "session_use",
+        "whoami",
+    ]
+    assert "llm" not in commands

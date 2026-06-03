@@ -6,7 +6,7 @@ from pathlib import Path
 from topilot.agent import AssistantPlanner, StreamState
 
 
-def test_build_copilot_argv_keeps_resume_model_and_workspace(make_settings, monkeypatch, tmp_path) -> None:
+def test_build_copilot_argv_keeps_session_id_model_and_workspace(make_settings, monkeypatch, tmp_path) -> None:
     workspace = tmp_path / "workspace-a"
     workspace.mkdir()
     planner = AssistantPlanner(
@@ -25,7 +25,8 @@ def test_build_copilot_argv_keeps_resume_model_and_workspace(make_settings, monk
     )
 
     assert argv[0] == "copilot.bat"
-    assert "--resume" in argv
+    assert "--session-id" in argv
+    assert "--resume" not in argv
     assert "session-123" in argv
     assert "--model" in argv
     assert "gpt-5" in argv
@@ -115,6 +116,24 @@ def test_build_copilot_help_argv_wraps_powershell_script(make_settings, monkeypa
     ]
 
 
+def test_build_copilot_config_help_argv_wraps_powershell_script(make_settings, monkeypatch) -> None:
+    planner = AssistantPlanner(make_settings(copilot_cli_command="C:/Copilot/copilot.ps1"))
+    monkeypatch.setattr(planner, "_resolve_copilot_command", lambda: "C:/Copilot/copilot.ps1")
+
+    argv = planner._build_copilot_config_help_argv()
+
+    assert argv == [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "C:/Copilot/copilot.ps1",
+        "help",
+        "config",
+    ]
+
+
 def test_parse_available_models_from_help_deduplicates_choices(make_settings) -> None:
     planner = AssistantPlanner(make_settings())
     help_text = """
@@ -124,6 +143,44 @@ def test_parse_available_models_from_help_deduplicates_choices(make_settings) ->
     """
 
     assert planner._parse_available_models_from_help(help_text) == ["gpt-5-mini", "gpt-5"]
+
+
+def test_parse_available_models_from_help_does_not_read_other_option_choices(make_settings) -> None:
+    planner = AssistantPlanner(make_settings())
+    help_text = """
+    Usage: copilot [options]
+      --model <model>                       Set the AI model to use
+      --mouse[=value]                       Enable mouse support
+      --output-format <format>              Output format
+                                            (choices: "text", "json")
+    """
+
+    assert planner._parse_available_models_from_help(help_text) == []
+
+
+def test_parse_available_models_from_config_help_reads_model_section(make_settings) -> None:
+    planner = AssistantPlanner(make_settings())
+    help_text = """
+    Configuration Settings:
+
+      `logLevel`: log level for CLI.
+
+      `model`: AI model to use for Copilot CLI.
+        - "claude-sonnet-4.6"
+        - "gpt-5.4"
+        - "gpt-5-mini"
+        - "gpt-5.4"
+
+      `mouse`: whether to enable mouse support.
+        - "on"
+        - "off"
+    """
+
+    assert planner._parse_available_models_from_config_help(help_text) == [
+        "claude-sonnet-4.6",
+        "gpt-5.4",
+        "gpt-5-mini",
+    ]
 
 
 def test_diagnose_copilot_cli_reports_missing_command_and_workspace(make_settings, tmp_path: Path) -> None:

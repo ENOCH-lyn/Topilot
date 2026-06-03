@@ -80,10 +80,10 @@
 2. 启动子进程并消费标准输出/标准错误。
 3. 解析 JSON 流事件并分类。
 4. 将工具调用与命令输出压缩为中文摘要。
-5. 提供 Copilot CLI 运行前诊断能力，用于 `/llm`、`/status` 和请求失败提示。
+5. 提供 Copilot CLI 运行前诊断能力，用于 `/status` 后端诊断按钮、状态摘要和请求失败提示。
 
 #### 2.5.3 设计要点
-1. 通过 `--resume <session_id>` 保证上下文连续，而不是把完整历史手工拼接进 prompt。
+1. 通过 `--session-id <session_id>` 绑定和恢复 Copilot CLI 会话，保证上下文连续，而不是把完整历史手工拼接进 prompt。
 2. 对 Windows `.bat`/`.cmd` 命令做换行转义，避免参数截断。
 3. 对不同类型工具结果采用不同摘要策略，提高移动端可读性。
 4. 在调用前检查 `copilot.cli_command` 是否可解析、工作区是否存在、超时配置是否有效；未就绪时不启动子进程，直接返回可行动的中文提示。
@@ -134,22 +134,22 @@
 
 | 命令 | 入参 | 输出 | 权限 | 失败反馈 |
 | --- | --- | --- | --- | --- |
-| `/start` | 无 | 命令列表 | 受白名单控制 | 未授权提示 |
-| `/help` | 无 | 命令列表 | 受白名单控制 | 未授权提示 |
+| `/start` | 无 | 主菜单按钮面板 | 受白名单控制 | 未授权提示 |
+| `/help` | 无 | 主菜单按钮面板 | 受白名单控制 | 未授权提示 |
 | `/whoami` | 无 | chat_id / user_id / username | 开放 | 无 |
-| `/llm` | 无 | Copilot 后端诊断报告，包含状态、命令、解析路径、工作区、模型、调用参数、候选模型和待处理问题 | 受白名单控制 | 未授权提示 |
 | `/session_current` | 无 | 当前会话 ID 及简要摘要 | 受白名单控制 | 未授权提示 |
 | `/sessions` | 无 | 会话菜单 | 受白名单控制 | 未授权提示 |
 | `/session_new [title]` | 可选标题 | 新建并切换会话 | 受白名单控制 | 未授权提示 |
 | `/session_use <prefix>` | 会话前缀 | 切换或接管结果 | 受白名单控制 | 会话不存在 / 未授权 |
 | `/model` | 无 | 模型选择键盘 | 受白名单控制 | 无可用模型 / 未授权 |
-| `/status` | 无 | 后端状态、当前会话、来源、状态、模型与工作区摘要 | 受白名单控制 | 未授权提示 |
+| `/status` | 无 | 后端状态、当前会话、来源、状态、模型与工作区摘要，并提供后端诊断按钮 | 受白名单控制 | 未授权提示 |
 
 ### 3.3 回调接口
 
 | 回调前缀 | 作用 | 典型值 |
 | --- | --- | --- |
 | `model_sel:` | 切换模型 | `model_sel:gpt-5-mini` |
+| `nav:` | 主菜单、状态、后端诊断、模型、会话等通用导航 | `nav:status` |
 | `smenu:` | 会话菜单分页 | `smenu:0` |
 | `sopen:` | 打开会话详情 | `sopen:<session_id>` |
 | `suse:` | 接管会话 | `suse:<session_id>` |
@@ -270,15 +270,16 @@
 4. 判断实际工作区是否存在；若接管会话传入的工作区不可用，则回退到默认工作区。
 5. 判断 `copilot.timeout_seconds` 是否大于 0。
 6. 将所有问题聚合进 `issues`，生成 `CopilotCliDiagnostic`；若 `issues` 为空，状态为“Copilot CLI 已就绪”，否则为“Copilot CLI 未就绪”。
-7. `/llm` 使用诊断对象渲染完整报告；`/status` 使用同一诊断对象渲染后端状态；普通对话在未就绪时直接返回失败提示，不启动 Copilot 子进程。
+7. `/status` 使用诊断对象渲染后端状态摘要，并通过 `nav:diagnostic` 按钮渲染完整后端诊断报告；普通对话在未就绪时直接返回失败提示，不启动 Copilot 子进程。
 
 ### 5.2 模型列表解析算法
-1. 通过 `_build_copilot_help_argv()` 构造帮助命令，普通可执行文件使用 `<command> --help`，`.ps1` 入口使用 PowerShell `-File <command> --help` 包装。
+1. 通过 `_build_copilot_help_argv()` 构造主帮助命令，普通可执行文件使用 `<command> --help`，`.ps1` 入口使用 PowerShell `-File <command> --help` 包装。
 2. 若 Copilot CLI 诊断未就绪，则跳过实时探测，避免启动必然失败的子进程。
-3. 启动子进程读取帮助输出，并使用正则定位 `--model <model>` 的 choices 段。
-4. 解析引号包裹的模型名称，并去重保留原顺序；Telegram 按钮展示前再次通过 `_normalize_model_list()` 清理空值与重复项，保证按钮展示和合法性校验口径一致。
-5. 若实时解析失败，则回退到配置中的 `available_models`。
-6. 若配置回退列表为空，则至少返回当前默认模型，保证 `/model` 不因空列表失效。
+3. 启动子进程读取主帮助输出，只在 `--model <model>` 自身帮助块内解析 choices，避免误读 `--output-format` 等其他参数的候选值。
+4. 若主帮助未列出模型候选，则继续执行 `copilot help config`，从 `model` 配置段读取模型列表。
+5. 解析引号包裹的模型名称，并去重保留原顺序；Telegram 按钮展示前再次通过 `_normalize_model_list()` 清理空值与重复项，保证按钮展示和合法性校验口径一致。
+6. 若实时解析失败，则回退到配置中的 `available_models`。
+7. 若配置回退列表为空，则至少返回当前默认模型，保证 `/model` 不因空列表失效。
 
 ### 5.3 流事件转译算法
 1. 逐行读取 CLI 标准输出。
@@ -308,13 +309,16 @@
 5. 若本机会话唯一匹配，则执行接管；若多个匹配，则返回歧义提示，要求输入更长前缀。
 
 ### 5.7 Telegram 回调渲染算法
-1. `/model` 命令先读取运行期模型缓存，再用 `_normalize_model_list()` 去除空值和重复值。
-2. `_render_model_menu()` 生成“当前模型 + 请选择模型”的文本和两列模型按钮；当前模型按钮带 `✓` 标识。
-3. `/sessions` 与 `smenu:` 回调共用 `_render_session_menu()`，页码先通过 `_callback_page()` 清洗，再按 `page_size` 切片；小于 0、非数字或超过最大页时自动夹到合法范围。
-4. `sopen:` 回调用 `_render_session_detail()` 生成“接管会话、查看历史、刷新详情、删除会话、返回列表”按钮。
-5. `shis:` 回调用 `_render_session_history()` 生成“刷新历史、返回详情、返回列表”按钮。
-6. `sdel:` 回调用 `_render_session_delete_confirm()` 生成“确认删除、取消、返回列表”按钮，确保删除操作必须二次确认。
-7. `model_sel:`、`sopen:`、`suse:`、`shis:`、`sdel:`、`sdelok:` 的 payload 均通过 `_callback_payload()` 提取并去除首尾空白。
+1. `/start` 与 `/help` 使用 `_render_main_menu()` 渲染主菜单按钮，提供状态与诊断、模型切换、会话管理、当前会话、新建会话和我的 ID 入口。
+2. `/status` 使用 `_render_status_panel()` 渲染状态摘要，并提供“后端诊断”“模型切换”“会话管理”“当前会话”“主菜单”等按钮。
+3. `nav:diagnostic` 使用 `_render_diagnostic_panel()` 展示完整 Copilot 后端诊断报告；`nav:model`、`nav:sessions`、`nav:session_current`、`nav:session_new` 等导航回调分别复用对应菜单渲染函数。
+4. `/model` 命令先读取运行期模型缓存，再用 `_normalize_model_list()` 去除空值和重复值。
+5. `_render_model_menu()` 生成“当前模型 + 请选择模型”的文本和两列模型按钮；当前模型按钮带 `✓` 标识，并追加状态、会话和主菜单按钮。
+6. `/sessions` 与 `smenu:` 回调共用 `_render_session_menu()`，页码先通过 `_callback_page()` 清洗，再按 `page_size` 切片；小于 0、非数字或超过最大页时自动夹到合法范围。
+7. `sopen:` 回调用 `_render_session_detail()` 生成“接管会话、查看历史、刷新详情、删除会话、返回列表、主菜单”按钮。
+8. `shis:` 回调用 `_render_session_history()` 生成“刷新历史、返回详情、返回列表、主菜单”按钮。
+9. `sdel:` 回调用 `_render_session_delete_confirm()` 生成“确认删除、取消、返回列表、主菜单”按钮，确保删除操作必须二次确认。
+10. `model_sel:`、`nav:`、`sopen:`、`suse:`、`shis:`、`sdel:`、`sdelok:` 的 payload 均通过 `_callback_payload()` 提取并去除首尾空白。
 
 ## 6. 异常处理方案
 
@@ -323,7 +327,7 @@
 | 配置文件不存在 | 抛出 `ConfigurationError`，首次运行自动引导初始化 |
 | 配置文件为空或 JSON 非法 | 启动失败并返回明确错误 |
 | `telegram.bot_token` 为空 | 启动失败并提示缺失字段 |
-| Copilot CLI 命令不存在或不可执行 | `/llm` 和 `topilot doctor` 展示命令解析问题；普通请求返回后端未就绪提示 |
+| Copilot CLI 命令不存在或不可执行 | `/status` 的后端诊断按钮和 `topilot doctor` 展示命令解析问题；普通请求返回后端未就绪提示 |
 | Copilot 工作区不存在 | 诊断报告写入 `issues`；普通请求不启动子进程 |
 | Copilot CLI 超时 | 杀掉子进程，返回包含超时秒数和排查建议的提示 |
 | Copilot CLI 返回非零退出码 | 返回退出码和 stderr/out 的 200 字符内摘要 |

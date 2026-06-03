@@ -27,15 +27,15 @@
 2. Telegram 最终回复消息
 3. `chats.json` 中的用户/助手对话记录
 4. 后端未就绪、非零退出码、空输出或超时提示
-5. `/llm` 可展示的 Copilot 后端诊断报告
+5. `/status` 后端诊断按钮可展示的 Copilot 后端诊断报告
 
 ## 4. 核心实现逻辑
 1. `TaskRunner.submit()` 负责拉取最近历史、确保当前会话存在并打开流式输出对象。
 2. `AssistantPlanner.plan()` 使用 `diagnose_copilot_cli()` 判断 CLI 是否就绪，不可用时统一返回后端未就绪提示。
-3. `_build_copilot_argv()` 组装 `--resume`、`--model`、`--output-format json`、`-p`、`-s`、`--add-dir`、`--allow-all-tools` 等参数。
+3. `_build_copilot_argv()` 组装 `--session-id`、`--model`、`--output-format json`、`-p`、`-s`、`--add-dir`、`--allow-all-tools` 等参数。
 4. `_forward_stdout_line()` 对每行 JSON 事件进行解析并分发到回复流或过程流。
 5. `TelegramLiveProgress` 负责双消息渲染、限频编辑、重复日志合并和 HTML 回退。
-6. `CopilotCliDiagnostic` 聚合命令解析、工作区、模型、超时和工具权限信息，供 `/llm`、`/status` 和失败提示复用。
+6. `CopilotCliDiagnostic` 聚合命令解析、工作区、模型、超时和工具权限信息，供 `/status` 状态摘要、后端诊断按钮和失败提示复用。
 
 ## 5. 技术方案与可选方案
 
@@ -54,7 +54,7 @@
 4. Telegram 过程消息编辑间隔不得高于每 1 秒 1 次，回复消息编辑间隔不得高于每 0.8 秒 1 次。
 5. 单条 Telegram 文本超过 3500 字符时，系统必须执行截断或分块，避免消息发送失败。
 6. 当 `copilot.cli_command` 指向不存在命令、工作区不存在或 `timeout_seconds <= 0` 时，系统不得启动 Copilot 子进程，必须返回“Copilot CLI 未就绪”并列出问题。
-7. `/llm` 必须输出后端状态、配置命令、解析命令、工作区存在性、当前模型、调用参数、可用模型列表和待处理问题。
+7. `/status` 的后端诊断按钮必须输出后端状态、配置命令、解析命令、工作区存在性、当前模型、调用参数、可用模型列表和待处理问题。
 
 ## 7. 测试数据与测试方案
 

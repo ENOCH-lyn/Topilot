@@ -7,7 +7,7 @@ import time
 from collections.abc import Awaitable, Callable
 from html import escape
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.error import BadRequest
 from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -17,6 +17,22 @@ from topilot.task_runner import TaskRunner
 Handler = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
+
+
+def _bot_commands() -> list[BotCommand]:
+    """返回需要注册到 Telegram 菜单的命令"""
+
+    return [
+        BotCommand("start", "打开主菜单"),
+        BotCommand("help", "查看帮助"),
+        BotCommand("status", "查看状态与诊断"),
+        BotCommand("model", "查看和切换模型"),
+        BotCommand("sessions", "管理会话"),
+        BotCommand("session_current", "查看当前会话"),
+        BotCommand("session_new", "新建会话"),
+        BotCommand("session_use", "按前缀切换会话"),
+        BotCommand("whoami", "查看 chat id"),
+    ]
 
 
 def _is_allowed(settings: Settings, chat_id: int | None) -> bool:
@@ -410,55 +426,34 @@ def build_application(settings: Settings) -> Application:
     async def on_startup(app: Application) -> None:
         await runner.start()
         app.bot_data["runner"] = runner
+        try:
+            await app.bot.set_my_commands(_bot_commands())
+            logger.info("Telegram Bot 命令菜单注册完成")
+        except Exception as exc:
+            logger.warning("Telegram Bot 命令菜单注册失败: %s", exc)
         logger.info("Telegram application 启动完成")
 
     async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await update.effective_message.reply_text(
-            "可用命令:\n"
-            "/whoami\n"
-            "/llm\n"
-            "/session_current\n"
-            "/sessions\n"
-            "/session_new [title]\n"
-            "/session_use <session_id前缀>\n"
-            "/model\n"
-            "/status\n"
-            "也可直接发送文本"
-        )
+        text, keyboard = _render_main_menu()
+        await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await update.effective_message.reply_text(
-            "帮助信息:\n"
-            "/whoami\n"
-            "/llm\n"
-            "/session_current\n"
-            "/sessions\n"
-            "/session_new [title]\n"
-            "/session_use <session_id前缀>\n"
-            "/model\n"
-            "/status\n"
-            "也可直接发送文本"
-        )
+        text, keyboard = _render_main_menu()
+        await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def whoami_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat or not update.effective_user:
             return
-        username = update.effective_user.username or "<none>"
         await update.effective_message.reply_text(
-            f"chat_id: {update.effective_chat.id}\n"
-            f"user_id: {update.effective_user.id}\n"
-            f"username: {username}"
+            _whoami_text(update),
+            reply_markup=InlineKeyboardMarkup(_render_back_to_main_keyboard()),
         )
-
-    async def llm_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.effective_message or not update.effective_chat:
-            return
-        await update.effective_message.reply_text(runner.llm_diagnostic_text(update.effective_chat.id))
 
     async def session_current_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
             return
-        await update.effective_message.reply_text(runner.session_current_text(update.effective_chat.id))
+        text, keyboard = _render_session_current_panel(runner.session_current_text(update.effective_chat.id))
+        await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def sessions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
@@ -469,20 +464,30 @@ def build_application(settings: Settings) -> Application:
         if not update.effective_message or not update.effective_chat:
             return
         title = " ".join(context.args).strip() if context.args else None
-        await update.effective_message.reply_text(runner.session_new_text(update.effective_chat.id, title))
+        await update.effective_message.reply_text(
+            runner.session_new_text(update.effective_chat.id, title),
+            reply_markup=InlineKeyboardMarkup(_render_session_action_keyboard()),
+        )
 
     async def session_use_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
             return
         if not context.args:
-            await update.effective_message.reply_text("请提供会话 ID 前缀")
+            await update.effective_message.reply_text(
+                "请提供会话 ID 前缀",
+                reply_markup=InlineKeyboardMarkup(_render_session_action_keyboard()),
+            )
             return
-        await update.effective_message.reply_text(runner.session_use_text(update.effective_chat.id, context.args[0]))
+        await update.effective_message.reply_text(
+            runner.session_use_text(update.effective_chat.id, context.args[0]),
+            reply_markup=InlineKeyboardMarkup(_render_session_action_keyboard()),
+        )
 
     async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat:
             return
-        await update.effective_message.reply_text(runner.status_text(update.effective_chat.id))
+        text, keyboard = _render_status_panel(runner.status_text(update.effective_chat.id))
+        await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat or not update.effective_message.text:
@@ -497,7 +502,8 @@ def build_application(settings: Settings) -> Application:
         chat_id = update.effective_chat.id
         models = _normalize_model_list(runner.list_models())
         if not models:
-            await update.effective_message.reply_text("暂时无法获取可用模型列表，当前无法修改模型")
+            text, keyboard = _render_status_panel("暂时无法获取可用模型列表，当前无法修改模型")
+            await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
             return
         current = runner.current_model(chat_id)
         text, keyboard = _render_model_menu(models, current)
@@ -521,10 +527,50 @@ def build_application(settings: Settings) -> Application:
             return
         runner.set_model(chat_id, model)
         await query.answer(f"已切换: {model}")
+        text, keyboard = _render_model_menu(_normalize_model_list(runner.list_models()), model, prefix=f"已切换: {model}")
         try:
-            await query.edit_message_text(f"✓ 当前模型: {model}")
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception:
             pass
+
+    async def navigation_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not query or not query.data:
+            return
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if not chat_id or not _is_allowed(settings, chat_id):
+            await query.answer("未授权", show_alert=True)
+            return
+
+        action = _callback_payload(query.data, "nav:")
+        await query.answer()
+
+        if action in {"main", "help"}:
+            text, keyboard = _render_main_menu()
+        elif action == "status":
+            text, keyboard = _render_status_panel(runner.status_text(chat_id))
+        elif action == "diagnostic":
+            text, keyboard = _render_diagnostic_panel(runner.llm_diagnostic_text(chat_id))
+        elif action == "model":
+            models = _normalize_model_list(runner.list_models())
+            if not models:
+                text, keyboard = _render_status_panel("暂时无法获取可用模型列表，当前无法修改模型")
+            else:
+                text, keyboard = _render_model_menu(models, runner.current_model(chat_id))
+        elif action == "sessions":
+            await _edit_session_menu(query, chat_id, page=0)
+            return
+        elif action == "session_current":
+            text, keyboard = _render_session_current_panel(runner.session_current_text(chat_id))
+        elif action == "session_new":
+            text = runner.session_new_text(chat_id)
+            keyboard = _render_session_action_keyboard()
+        elif action == "whoami":
+            text, keyboard = _whoami_text(update), _render_back_to_main_keyboard()
+        else:
+            text, keyboard = _render_main_menu()
+
+        await query.edit_message_text(_trim_telegram_text(text), reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def session_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -551,7 +597,7 @@ def build_application(settings: Settings) -> Application:
             sid = _callback_payload(data, "suse:")
             text = runner.takeover_session(chat_id, sid)
             try:
-                await query.edit_message_text(f"✓ {text}")
+                await _edit_session_detail(query, chat_id, sid, prefix=f"✓ {text}")
             except Exception:
                 pass
 
@@ -664,7 +710,6 @@ def build_application(settings: Settings) -> Application:
     application = builder.post_init(on_startup).build()
 
     application.add_handler(CommandHandler("whoami", whoami_command))
-    application.add_handler(CommandHandler("llm", restricted(settings, llm_command)))
     application.add_handler(CommandHandler("session_current", restricted(settings, session_current_command)))
     application.add_handler(CommandHandler("sessions", restricted(settings, sessions_command)))
     application.add_handler(CommandHandler("session_new", restricted(settings, session_new_command)))
@@ -674,6 +719,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("help", restricted(settings, help_command)))
     application.add_handler(CommandHandler("status", restricted(settings, status_command)))
     application.add_handler(CallbackQueryHandler(model_select_callback, pattern=r"^model_sel:"))
+    application.add_handler(CallbackQueryHandler(navigation_callback, pattern=r"^nav:"))
     application.add_handler(CallbackQueryHandler(session_callback, pattern=r"^(smenu:|sopen:|suse:|shis:|sdel:|sdelok:)"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, restricted(settings, text_message)))
 
@@ -693,6 +739,101 @@ def _chunk_text(text: str, limit: int = 3500) -> list[str]:
     return chunks
 
 
+def _render_main_menu() -> tuple[str, list[list[InlineKeyboardButton]]]:
+    """渲染主菜单文本和按钮"""
+
+    text = "Topilot 主菜单\n直接发送文本即可开始对话。"
+    keyboard = [
+        [
+            InlineKeyboardButton("状态与诊断", callback_data="nav:status"),
+            InlineKeyboardButton("模型切换", callback_data="nav:model"),
+        ],
+        [
+            InlineKeyboardButton("会话管理", callback_data="nav:sessions"),
+            InlineKeyboardButton("当前会话", callback_data="nav:session_current"),
+        ],
+        [
+            InlineKeyboardButton("新建会话", callback_data="nav:session_new"),
+            InlineKeyboardButton("我的 ID", callback_data="nav:whoami"),
+        ],
+    ]
+    return text, keyboard
+
+
+def _render_status_panel(status_text: str) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    """渲染状态摘要和常用操作按钮"""
+
+    keyboard = [
+        [
+            InlineKeyboardButton("后端诊断", callback_data="nav:diagnostic"),
+            InlineKeyboardButton("模型切换", callback_data="nav:model"),
+        ],
+        [
+            InlineKeyboardButton("会话管理", callback_data="nav:sessions"),
+            InlineKeyboardButton("当前会话", callback_data="nav:session_current"),
+        ],
+        [InlineKeyboardButton("主菜单", callback_data="nav:main")],
+    ]
+    return status_text, keyboard
+
+
+def _render_diagnostic_panel(diagnostic_text: str) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    """渲染 Copilot 后端诊断面板"""
+
+    keyboard = [
+        [InlineKeyboardButton("刷新诊断", callback_data="nav:diagnostic")],
+        [
+            InlineKeyboardButton("状态摘要", callback_data="nav:status"),
+            InlineKeyboardButton("主菜单", callback_data="nav:main"),
+        ],
+    ]
+    return diagnostic_text, keyboard
+
+
+def _render_session_current_panel(text: str) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    """渲染当前会话摘要和快捷按钮"""
+
+    keyboard = [
+        [
+            InlineKeyboardButton("会话管理", callback_data="nav:sessions"),
+            InlineKeyboardButton("新建会话", callback_data="nav:session_new"),
+        ],
+        [
+            InlineKeyboardButton("模型切换", callback_data="nav:model"),
+            InlineKeyboardButton("状态与诊断", callback_data="nav:status"),
+        ],
+        [InlineKeyboardButton("主菜单", callback_data="nav:main")],
+    ]
+    return text, keyboard
+
+
+def _render_session_action_keyboard() -> list[list[InlineKeyboardButton]]:
+    """渲染会话操作后的快捷按钮"""
+
+    return [
+        [
+            InlineKeyboardButton("会话管理", callback_data="nav:sessions"),
+            InlineKeyboardButton("当前会话", callback_data="nav:session_current"),
+        ],
+        [InlineKeyboardButton("主菜单", callback_data="nav:main")],
+    ]
+
+
+def _render_back_to_main_keyboard() -> list[list[InlineKeyboardButton]]:
+    """渲染返回主菜单按钮"""
+
+    return [[InlineKeyboardButton("主菜单", callback_data="nav:main")]]
+
+
+def _whoami_text(update: Update) -> str:
+    """渲染当前 Telegram 身份信息"""
+
+    chat_id = update.effective_chat.id if update.effective_chat else "<none>"
+    user_id = update.effective_user.id if update.effective_user else "<none>"
+    username = update.effective_user.username if update.effective_user and update.effective_user.username else "<none>"
+    return f"chat_id: {chat_id}\nuser_id: {user_id}\nusername: {username}"
+
+
 def _build_model_keyboard(models: list[str], current: str) -> list[list[InlineKeyboardButton]]:
     """构建模型选择内联键盘（2列布局，当前模型标 ✓）"""
     keyboard: list[list[InlineKeyboardButton]] = []
@@ -708,11 +849,24 @@ def _build_model_keyboard(models: list[str], current: str) -> list[list[InlineKe
     return keyboard
 
 
-def _render_model_menu(models: list[str], current: str) -> tuple[str, list[list[InlineKeyboardButton]]]:
+def _render_model_menu(models: list[str], current: str, prefix: str | None = None) -> tuple[str, list[list[InlineKeyboardButton]]]:
     """渲染模型选择文本和按钮"""
 
     normalized = _normalize_model_list(models)
-    return f"当前模型: {current}\n请选择模型:", _build_model_keyboard(normalized, current)
+    text = f"当前模型: {current}\n请选择模型:"
+    if prefix:
+        text = f"{prefix}\n\n{text}"
+    keyboard = _build_model_keyboard(normalized, current)
+    keyboard.extend(
+        [
+            [
+                InlineKeyboardButton("状态与诊断", callback_data="nav:status"),
+                InlineKeyboardButton("会话管理", callback_data="nav:sessions"),
+            ],
+            [InlineKeyboardButton("主菜单", callback_data="nav:main")],
+        ]
+    )
+    return text, keyboard
 
 
 def _normalize_model_list(models: list[str]) -> list[str]:
@@ -738,7 +892,16 @@ def _trim_telegram_text(text: str, limit: int = 3500) -> str:
 def _render_session_menu(items: list[dict], page: int, page_size: int = 6) -> tuple[str, list[list[InlineKeyboardButton]]]:
     total = len(items)
     if total == 0:
-        return "未发现可管理会话", [[InlineKeyboardButton("刷新", callback_data="smenu:0")]]
+        return (
+            "未发现可管理会话",
+            [
+                [
+                    InlineKeyboardButton("刷新", callback_data="smenu:0"),
+                    InlineKeyboardButton("新建会话", callback_data="nav:session_new"),
+                ],
+                [InlineKeyboardButton("主菜单", callback_data="nav:main")],
+            ],
+        )
 
     max_page = max((total - 1) // page_size, 0)
     page = max(0, min(page, max_page))
@@ -766,6 +929,13 @@ def _render_session_menu(items: list[dict], page: int, page_size: int = 6) -> tu
     if page < max_page:
         nav.append(InlineKeyboardButton("下一页", callback_data=f"smenu:{page + 1}"))
     keyboard.append(nav)
+    keyboard.append(
+        [
+            InlineKeyboardButton("新建会话", callback_data="nav:session_new"),
+            InlineKeyboardButton("当前会话", callback_data="nav:session_current"),
+        ]
+    )
+    keyboard.append([InlineKeyboardButton("主菜单", callback_data="nav:main")])
 
     return "\n".join(lines), keyboard
 
@@ -782,6 +952,7 @@ def _render_session_detail(detail_text: str, session_id: str, prefix: str | None
         [InlineKeyboardButton("刷新详情", callback_data=f"sopen:{session_id}")],
         [InlineKeyboardButton("删除会话", callback_data=f"sdel:{session_id}")],
         [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
+        [InlineKeyboardButton("主菜单", callback_data="nav:main")],
     ]
     return text, keyboard
 
@@ -793,6 +964,7 @@ def _render_session_history(history_text: str, session_id: str) -> tuple[str, li
         [InlineKeyboardButton("刷新历史", callback_data=f"shis:{session_id}")],
         [InlineKeyboardButton("返回详情", callback_data=f"sopen:{session_id}")],
         [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
+        [InlineKeyboardButton("主菜单", callback_data="nav:main")],
     ]
     return history_text, keyboard
 
@@ -804,6 +976,7 @@ def _render_session_delete_confirm(detail_text: str, session_id: str) -> tuple[s
         [InlineKeyboardButton("确认删除", callback_data=f"sdelok:{session_id}")],
         [InlineKeyboardButton("取消", callback_data=f"sopen:{session_id}")],
         [InlineKeyboardButton("返回列表", callback_data="smenu:0")],
+        [InlineKeyboardButton("主菜单", callback_data="nav:main")],
     ]
     return f"确认删除该会话？\n\n{detail_text}", keyboard
 

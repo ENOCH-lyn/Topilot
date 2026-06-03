@@ -196,10 +196,11 @@ class AssistantPlanner:
         return self.diagnose_copilot_cli().ready
 
     async def fetch_available_models(self) -> list[str]:
-        """从 copilot --help 实时解析可用模型列表
+        """从 Copilot CLI 帮助信息实时解析可用模型列表
 
-        解析 CLI 输出中 --model <model> 对应的 choices
-        获取失败时返回配置中的 COPILOT_MODELS
+        优先解析主帮助中 --model <model> 对应的 choices；若当前 CLI
+        版本未在主帮助中列出模型，则继续解析 `copilot help config`
+        中的 `model` 配置段；获取失败时返回配置回退模型。
         """
         diagnostic = self.diagnose_copilot_cli()
         if not diagnostic.ready:
@@ -221,6 +222,10 @@ class AssistantPlanner:
             if models:
                 logger.info("实时获取到 %d 个可用模型", len(models))
                 return models
+            config_models = await self._fetch_available_models_from_config_help()
+            if config_models:
+                logger.info("从配置帮助获取到 %d 个可用模型", len(config_models))
+                return config_models
         except Exception as exc:
             logger.warning("获取模型列表失败: %s", exc)
         return self._fallback_available_models()
@@ -237,6 +242,16 @@ class AssistantPlanner:
     def _build_copilot_help_argv(self) -> list[str]:
         """构造 Copilot CLI 帮助命令，兼容 Windows PowerShell 脚本入口"""
 
+        return self._build_copilot_info_argv("--help")
+
+    def _build_copilot_config_help_argv(self) -> list[str]:
+        """构造 Copilot CLI 配置帮助命令"""
+
+        return self._build_copilot_info_argv("help", "config")
+
+    def _build_copilot_info_argv(self, *args: str) -> list[str]:
+        """构造只读取帮助信息的 Copilot CLI 命令"""
+
         command = self._resolve_copilot_command()
         if command.lower().endswith(".ps1"):
             return [
@@ -246,25 +261,91 @@ class AssistantPlanner:
                 "Bypass",
                 "-File",
                 command,
-                "--help",
+                *args,
             ]
-        return [command, "--help"]
+        return [command, *args]
 
     def _parse_available_models_from_help(self, text: str) -> list[str]:
         """从 Copilot CLI 帮助文本中解析 --model choices 列表"""
 
-        model_section = re.search(r"--model\s+<model>.*?choices:\s*(.*?)\)", text, re.DOTALL)
-        if not model_section:
+        model_option = self._extract_option_block(text, "--model")
+        if not model_option:
             return []
+        return self._parse_choices_from_block(model_option)
 
+    def _parse_available_models_from_config_help(self, text: str) -> list[str]:
+        """从 `copilot help config` 的 model 配置段解析模型列表"""
+
+        in_model_section = False
         seen: set[str] = set()
         models: list[str] = []
-        for model in re.findall(r'"([^"]+)"', model_section.group(1)):
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("`model`:"):
+                in_model_section = True
+                continue
+            if in_model_section and re.match(r"`[^`]+`:", stripped):
+                break
+            if not in_model_section:
+                continue
+            match = re.match(r'-\s+"([^"]+)"\s*$', stripped)
+            if not match:
+                continue
+            model = match.group(1).strip()
             if model in seen:
                 continue
             seen.add(model)
             models.append(model)
         return models
+
+    async def _fetch_available_models_from_config_help(self) -> list[str]:
+        """读取 `copilot help config` 并解析模型列表"""
+
+        argv = self._build_copilot_config_help_argv()
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        raw, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+        if proc.returncode != 0:
+            raise RuntimeError(f"copilot help config exited with {proc.returncode}")
+        return self._parse_available_models_from_config_help(raw.decode(errors="replace"))
+
+    def _extract_option_block(self, text: str, option_name: str) -> str:
+        """提取单个 CLI option 的帮助块，避免跨参数误读 choices"""
+
+        lines = text.splitlines()
+        block: list[str] = []
+        collecting = False
+        option_pattern = re.compile(rf"^\s*(?:-\w,\s*)?{re.escape(option_name)}(?:[\s=]|$)")
+        any_option_pattern = re.compile(r"^\s*(?:-\w,\s*)?--[\w-]+(?:[\s=]|$)|^\s*-\w,\s*--[\w-]+")
+
+        for line in lines:
+            if not collecting:
+                if option_pattern.match(line):
+                    collecting = True
+                    block.append(line)
+                continue
+            if any_option_pattern.match(line):
+                break
+            block.append(line)
+        return "\n".join(block)
+
+    def _parse_choices_from_block(self, text: str) -> list[str]:
+        """解析帮助块中的 choices 列表"""
+
+        choice_section = re.search(r"choices:\s*(.*?)\)", text, re.DOTALL)
+        if not choice_section:
+            return []
+        seen: set[str] = set()
+        choices: list[str] = []
+        for choice in re.findall(r'"([^"]+)"', choice_section.group(1)):
+            if choice in seen:
+                continue
+            seen.add(choice)
+            choices.append(choice)
+        return choices
 
     async def _plan_with_copilot_cli(
         self,
@@ -892,7 +973,7 @@ class AssistantPlanner:
         effective_model = model or self._settings.copilot_cli_model
         safe_prompt = self._normalize_prompt_for_command(prompt, command)
         base_args = [
-            "--resume",
+            "--session-id",
             session_id,
             "--model",
             effective_model,

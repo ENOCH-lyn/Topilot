@@ -96,14 +96,15 @@ Common configuration fields:
 ## Available Bot Commands
 
 - `/whoami`: View current chat/user info
-- `/llm`: View Copilot backend diagnostics, including command, resolved path, workspace, model, arguments, and issues
 - `/session_current`: View current session ID with a brief summary
 - `/sessions`: Session management entry (list/takeover/history/delete)
 - `/session_new [title]`: Create and switch to a new session
 - `/session_use <session_id_prefix>`: Switch to a saved session or take over the uniquely matched local session
 - `/model`: View/switch current model
-- `/status`: View backend status, current session, source, state, model, and workspace summary
+- `/status`: View backend status, current session, source, state, model, and workspace summary, with a button for detailed backend diagnostics
 - Send text directly to start chatting
+
+The bot registers its command menu with Telegram on startup. `/start`, `/help`, `/status`, `/model`, `/sessions`, and `/session_current` also expose inline buttons for common actions.
 
 ## Current Scope
 

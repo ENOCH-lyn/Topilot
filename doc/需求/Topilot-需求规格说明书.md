@@ -80,15 +80,16 @@ Topilot 当前需求拆分为五个核心模块：
 ### 7.2 Telegram 接入与访问控制模块
 
 #### 7.2.1 功能概述
-该模块负责接收 Telegram 消息，暴露命令入口，并对除诊断命令外的业务能力执行白名单控制。
+该模块负责接收 Telegram 消息，暴露命令入口，并对除 `/whoami` 外的业务能力执行白名单控制。
 
 #### 7.2.2 结构化需求
 1. 系统应支持接收文本消息并把非命令文本视为 AI 输入。
-2. 系统应支持以下命令：`/start`、`/help`、`/whoami`、`/llm`、`/session_current`、`/sessions`、`/session_new`、`/session_use`、`/model`、`/status`。
+2. 系统应支持以下命令：`/start`、`/help`、`/whoami`、`/session_current`、`/sessions`、`/session_new`、`/session_use`、`/model`、`/status`。
 3. 系统应基于 `telegram.allowed_chat_ids` 执行授权校验；当白名单为空时，默认允许所有 Chat 访问。
 4. 对未授权的 Chat，系统应拒绝调用，并返回如何获取 `chat_id` 的提示信息。
 5. `/whoami` 必须保持可用，用于协助获取授权所需的 `chat_id`。
-6. `/status` 应展示后端状态，以及当前会话、来源、状态、模型和工作区摘要。
+6. `/status` 应展示后端状态，以及当前会话、来源、状态、模型和工作区摘要，并提供后端诊断按钮以查看命令、解析路径、工作区、模型、调用参数、候选模型和待处理问题。
+7. 系统启动时应向 Telegram 注册公开命令菜单；`/start`、`/help`、`/status`、`/model`、`/sessions` 和 `/session_current` 等入口应提供内联按钮，降低移动端输入成本。
 
 ### 7.3 Copilot 对话与流式展示模块
 
@@ -125,7 +126,7 @@ Topilot 当前需求拆分为五个核心模块：
 该模块负责在启动时发现当前 Copilot CLI 可用模型，并通过 Telegram 内联按钮为用户提供可切换入口。
 
 #### 7.5.2 结构化需求
-1. 系统应在启动时优先执行 `copilot --help` 并从帮助输出中解析可用模型列表。
+1. 系统应在启动时优先执行 `copilot --help`，只从 `--model` 参数块解析可用模型列表；若主帮助未列出模型，应继续从 `copilot help config` 的 `model` 配置段解析候选模型。
 2. 当实时解析失败时，系统应回退到配置文件中的 `copilot.available_models` 列表。
 3. `/model` 应展示当前模型和候选模型按钮。
 4. 用户点击模型按钮后，系统应校验模型合法性，并把模型选择持久化到当前 Chat。

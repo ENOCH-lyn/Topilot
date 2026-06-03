@@ -68,7 +68,7 @@ agent.py
 
 ### 4.4 选择原因
 1. 与项目背景完全一致，最大化复用现有 Copilot 账号能力。
-2. 当前仓库已通过 `--resume session_id`、`--model`、`--output-format json`、`--add-dir` 等参数完成 CLI 对接。
+2. 当前仓库已通过 `--session-id session_id`、`--model`、`--output-format json`、`--add-dir` 等参数完成 CLI 对接。
 3. 能直接利用 Copilot CLI 自带的工具调用和会话系统。
 
 ### 4.5 优缺点
