@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from topilot.copilot_sessions import CopilotSessionInfo
@@ -336,3 +337,140 @@ def test_task_runner_session_use_takes_over_unique_discovered_prefix(make_settin
     assert text == "已接管会话: local-session-001"
     assert runner._sessions.active_session(100) == "local-session-001"
     assert runner._sessions.active_model(100) == "gpt-5"
+
+
+def test_task_runner_start_and_model_helpers_refresh_cached_models(make_settings) -> None:
+    settings = make_settings(copilot_available_models=["gpt-5-mini"])
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    class FakePlanner:
+        async def fetch_available_models(self) -> list[str]:
+            return ["gpt-5", "gpt-5-mini", "claude-sonnet-4.6"]
+
+        def llm_status_text(self, model: str | None = None) -> str:
+            return "Copilot CLI 未就绪（命令未找到或不可执行: copilot）"
+
+    runner = TaskRunner(settings, _send_message)
+    runner._planner = FakePlanner()
+
+    asyncio.run(runner.start())
+    runner.set_model(100, "gpt-5")
+
+    assert runner.list_models() == ["gpt-5", "gpt-5-mini", "claude-sonnet-4.6"]
+    assert runner.current_model(100) == "gpt-5"
+    assert runner.llm_status_text() == "Copilot CLI 未就绪（命令未找到或不可执行: copilot）"
+
+
+def test_task_runner_session_menu_takeover_detail_history_and_live_payload(make_settings) -> None:
+    settings = make_settings()
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    runner = TaskRunner(settings, _send_message)
+    stored_session = runner._sessions.create_session(100, title="stored")
+    runner._sessions.upsert_session(
+        100,
+        stored_session,
+        title="stored",
+        cwd="C:/stored",
+        model="gpt-5-mini",
+        source="saved",
+        last_event_at="2026-05-05T10:00:00Z",
+        running=False,
+    )
+
+    local_running = CopilotSessionInfo(
+        session_id="local-running",
+        cwd="C:/live",
+        model="gpt-5",
+        summary="local session",
+        running=True,
+        last_event_at="2026-05-05T12:00:00Z",
+        history_lines=["line-1", "line-2", "line-3"],
+    )
+    local_idle = CopilotSessionInfo(
+        session_id="local-idle",
+        cwd="C:/idle",
+        model="gpt-4.1",
+        summary="idle session",
+        running=False,
+        last_event_at="2026-05-05T11:00:00Z",
+        history_lines=[],
+    )
+    session_map = {local_running.session_id: local_running, local_idle.session_id: local_idle}
+    runner._inspector.list_sessions = lambda limit=20: [local_running, local_idle]
+    runner._inspector.get_session = lambda sid: session_map.get(sid)
+    runner._inspector.delete_session = lambda sid: sid == local_running.session_id
+
+    refreshed = runner.refresh_discovered_sessions(limit=10)
+    items = runner.session_menu_items(100, limit=10)
+    takeover_text = runner.takeover_session(100, local_running.session_id)
+    detail_text = runner.session_detail_text(100, local_running.session_id)
+    history_text = runner.session_history_text(100, local_running.session_id)
+    live_payload = runner.session_live_payload(100, local_running.session_id)
+
+    assert refreshed[0]["id"] == "local-running"
+    assert items[0]["id"] == "local-running"
+    assert items[0]["running"] is True
+    assert takeover_text == "已接管会话: local-running"
+    assert "状态: 运行中" in detail_text
+    assert "模型: gpt-5" in detail_text
+    assert "最近历史:" in history_text
+    assert "- line-3" in history_text
+    assert live_payload["exists"] is True
+    assert live_payload["running"] is True
+    assert "会话: local-running" in str(live_payload["text"])
+
+
+def test_task_runner_delete_and_missing_session_branches(make_settings) -> None:
+    settings = make_settings()
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    runner = TaskRunner(settings, _send_message)
+    session_id = runner._sessions.create_session(100, title="stored")
+    runner._sessions.upsert_session(100, session_id, title="stored", cwd="C:/workspace", model="gpt-5-mini")
+    runner._inspector.delete_session = lambda sid: (_ for _ in ()).throw(RuntimeError("boom"))
+    runner._inspector.get_session = lambda sid: None
+
+    assert runner.delete_session(100, session_id) == "会话已删除"
+    assert runner.delete_session(100, "missing") == "会话不存在或无法删除"
+    assert runner.session_history_text(100, "missing") == "未找到该会话的历史"
+
+    payload = runner.session_live_payload(100, "missing")
+    assert payload["exists"] is False
+    assert payload["signature"] == "missing:missing"
+
+
+def test_task_runner_session_text_helpers_cover_empty_list_new_session_and_stored_fallback(make_settings) -> None:
+    settings = make_settings()
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    runner = TaskRunner(settings, _send_message)
+
+    assert runner.session_list_text(100) == "暂无会话。可用 /session_new 新建"
+    assert runner.session_use_text(100, "   ") == "未找到会话:    "
+
+    created_text = runner.session_new_text(100, title="manual")
+    session_id = runner._sessions.active_session(100)
+    runner._sessions.upsert_session(
+        100,
+        session_id,
+        title="manual",
+        cwd="C:/manual",
+        model="gpt-5-mini",
+        source="saved",
+        running=False,
+    )
+    runner._inspector.get_session = lambda sid: None
+
+    assert created_text.startswith("已新建并切换会话: ")
+    assert "manual" in runner.session_list_text(100)
+    assert "当前激活: 是" in runner.session_detail_text(100, session_id)
+    assert runner.takeover_session(100, "missing") == "未找到该会话"

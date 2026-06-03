@@ -4,7 +4,7 @@
 
 简体中文 | [English](./README-en.md)
 
-将 GitHub Copilot CLI 接入 Telegram Bot 使用
+通过 Telegram Bot 使用 GitHub Copilot CLI
 
 ## 运行截图
 
@@ -17,17 +17,19 @@
 
 ## 项目背景
 
-Openclaw等项目消耗Token速度普遍较快，但是很多功能在日常生活中用不到
+Topilot 将本地 GitHub Copilot CLI 桥接到 Telegram Bot，面向个人远程使用场景。
 
-而学生党能免费用Copilot，日常使用时可能有远程操控的需求，希望能像 OpenClaw 那样接入 Bot 使用
+项目重点解决以下问题：
 
-因此，本项目提供了将 GitHub Copilot CLI 接入 Telegram Bot 的能力
+- 在移动端继续使用本机已登录的 Copilot CLI
+- 在 Telegram 中查看流式回复与工具执行过程
+- 接管本机已有会话并延续上下文
 
 ## 功能特性
 
 - Telegram 机器人接入与 Chat ID 白名单控制
 - Copilot 会话功能与多会话切换
-- 快捷接管运行中的会话，方便用户在手机上继续进行会话
+- 接管本机运行中的会话，并在会话详情页追踪历史刷新
 - 流式传输结果
 - 工具调用过程等展示
 
@@ -36,8 +38,8 @@ Openclaw等项目消耗Token速度普遍较快，但是很多功能在日常生�
 - Python 3.11+
 - 已安装并可执行的 `copilot` CLI
 - 已完成 `copilot login`
-- 拥有Telegram Bot Token
-- Windows PowerShell 或 PowerShell
+- 拥有 Telegram Bot Token
+- Windows PowerShell 或兼容的 PowerShell 环境
 
 ## 安装与启动
 
@@ -90,7 +92,7 @@ topilot start
 - `copilot.reasoning_effort`：传递给 Copilot CLI 的推理强度，可为空
 - `copilot.forward_reasoning`：是否在非流式路径转发思考文本
 - `runtime.workspace_root`：默认工作区路径
-- `runtime.session_watch_interval_seconds`：接管会话轮询间隔
+- `runtime.session_watch_interval_seconds`：会话追踪轮询间隔，运行时按 `1` 至 `15` 秒范围生效
 - `logging.log_level`：文件日志级别
 - `logging.console_log_level`：控制台日志级别
 - `logging.httpx_log_level`：`httpx` 日志级别，建议 WARNING，避免轮询请求刷屏
@@ -108,15 +110,15 @@ topilot start
 
 Bot 启动时会自动向 Telegram 注册命令菜单；`/start`、`/help`、`/status`、`/model`、`/sessions`、`/session_current` 等入口也提供内联按钮，常用操作可直接点击完成。
 
-## 当前完成范围
+## 当前版本范围
 
-当前仓库已完成课程阶段 1/2 的核心范围：
+当前版本已实现：
 
 - 配置初始化、覆盖备份、启动前 `doctor` 诊断
 - Telegram 命令、按钮回调、Chat ID 白名单和 `/whoami` 诊断
 - Copilot CLI 文本对话、JSON 流式回复和工具过程摘要
 - 多会话创建、切换、删除、本机 `session-state` 发现与接管
-- 运行中会话轮询追踪
+- 通过会话详情页对运行中会话进行轮询追踪
 - 模型发现、回退候选、按钮切换和按 Chat 持久化
 - 基础 pytest 自动化测试套件
 
@@ -131,11 +133,12 @@ pip install -e ".[dev]"
 pytest
 ```
 
-当前仓库基础测试覆盖配置、存储、会话扫描、Copilot 事件解析、异常提示、Telegram 白名单、命令注册、模型菜单和会话回调渲染逻辑。
+自动化测试覆盖配置、存储、会话扫描、Copilot 事件解析、异常提示、Telegram 白名单、命令注册、模型菜单和会话回调渲染逻辑。
+截至 2026-06-03，项目已完成真实 Telegram 外网联调与真实 Copilot CLI 集成联调，核心交互链路运行正常。
 
 ## License
 
 MIT License，详见 [LICENSE](./LICENSE)
 
 ## 免责声明
-项目为个人兴趣开发的非商业项目，旨在探索 GitHub Copilot CLI 的 Telegram Bot 接入可能性。由于项目大多为vibe coding而来，加上资源和能力有限，因此无法提供任何形式的安全保证或责任承担。使用本项目可能存在安全风险，包括但不限于未经授权的访问、数据泄露、滥用等。请务必在安全的环境中使用，并自行承担使用风险。对于任何因使用本项目而导致的损失或问题，本项目概不负责。
+本项目定位为个人自托管工具，适用于个人可信环境。使用者需自行保护 Telegram Bot Token、Copilot 登录状态、本地工作区和访问白名单。项目不提供企业级隔离、审计或安全担保，因使用本项目产生的风险与后果由使用者自行承担。

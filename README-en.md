@@ -17,17 +17,19 @@ Use GitHub Copilot CLI through a Telegram Bot
 
 ## Background
 
-Projects like Openclaw often consume tokens quickly, while many of their features are not needed for daily use.
+Topilot bridges a local GitHub Copilot CLI instance to a Telegram Bot for personal remote-access scenarios.
 
-Students can use Copilot for free, and in daily usage there may be a need for remote control, with an experience similar to OpenClaw via a bot.
+The project focuses on three practical needs:
 
-Therefore, this project provides a way to connect GitHub Copilot CLI to a Telegram Bot.
+- continue using a locally authenticated Copilot CLI from mobile
+- view streaming replies and tool activity in Telegram
+- take over an existing local session and keep its context
 
 ## Features
 
 - Telegram bot integration with Chat ID whitelist control
 - Copilot session support with multi-session switching
-- Quick takeover of running sessions so you can continue on mobile
+- Take over a local running session and follow its history from the session detail view
 - Streaming responses
 - Display of tool-calling process and related output
 
@@ -108,13 +110,13 @@ The bot registers its command menu with Telegram on startup. `/start`, `/help`, 
 
 ## Current Scope
 
-The repository now covers the core stage 1/2 scope:
+The current version includes:
 
 - Configuration initialization, config backups, and `doctor` diagnostics
 - Telegram commands, inline callbacks, Chat ID whitelist, and `/whoami`
 - Copilot CLI text conversations, JSON streaming replies, and tool progress summaries
 - Multi-session create/switch/delete, local `session-state` discovery, and takeover
-- Polling and refreshing a running local session
+- Polling and refreshing a running local session from the session detail flow
 - Model discovery, fallback candidates, button-based switching, and per-Chat persistence
 - A baseline pytest automation suite
 
@@ -130,10 +132,11 @@ pytest
 ```
 
 The baseline tests cover configuration, storage, local session scanning, Copilot event parsing, failure messages, Telegram authorization, command registration, model menus, and session callback rendering.
+As of 2026-06-03, the project has also passed real Telegram external-network integration and real Copilot CLI integration.
 
 ## License
 
 MIT License. See [LICENSE](./LICENSE) for details.
 
 ## Disclaimer
-This is a non-commercial personal-interest project intended to explore the possibility of integrating GitHub Copilot CLI with a Telegram Bot. Since much of the project was built through vibe coding and resources/capabilities are limited, no form of security guarantee or liability can be provided. Using this project may involve security risks, including but not limited to unauthorized access, data leakage, or abuse. Please use it only in a secure environment and at your own risk. The project is not responsible for any loss or issues caused by usage.
+This project is intended as a self-hosted personal tool for use in a trusted environment. Users are responsible for protecting their Telegram Bot token, Copilot login state, local workspace, and access whitelist. The project does not provide enterprise-grade isolation, auditing, or security guarantees, and all usage risks remain with the operator.
