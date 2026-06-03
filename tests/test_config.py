@@ -110,6 +110,19 @@ def test_load_settings_reads_json_config_and_creates_runtime_dirs(tmp_path: Path
     assert settings.log_file_path.parent.exists()
 
 
+def test_load_settings_ignores_invalid_chat_ids(tmp_path: Path) -> None:
+    paths = build_app_paths(tmp_path / "app")
+    payload = default_config_payload(paths)
+    payload["telegram"]["bot_token"] = "telegram-token"
+    payload["telegram"]["allowed_chat_ids"] = "1001, nope, -42, , 1002"
+
+    write_config(payload, paths.config_file)
+
+    settings = load_settings(paths.home_dir)
+
+    assert settings.allowed_chat_ids == {1001, -42, 1002}
+
+
 def test_load_settings_requires_non_empty_bot_token(tmp_path: Path) -> None:
     paths = build_app_paths(tmp_path / "app")
     payload = default_config_payload(paths)

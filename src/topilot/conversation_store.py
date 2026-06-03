@@ -32,10 +32,26 @@ class ConversationStore:
         if not isinstance(payload, dict):
             self._conversations = {}
             return
-        self._conversations = {
-            chat_id: [ChatTurn.from_dict(item) for item in turns]
-            for chat_id, turns in payload.items()
-        }
+        conversations: dict[str, list[ChatTurn]] = {}
+        for chat_id, turns in payload.items():
+            if not isinstance(turns, list):
+                continue
+            parsed_turns: list[ChatTurn] = []
+            for item in turns:
+                if not isinstance(item, dict):
+                    continue
+                role = str(item.get("role") or "").strip()
+                content = item.get("content")
+                created_at = item.get("created_at")
+                if not role or not isinstance(content, str):
+                    continue
+                if isinstance(created_at, str) and created_at:
+                    parsed_turns.append(ChatTurn(role=role, content=content, created_at=created_at))
+                else:
+                    parsed_turns.append(ChatTurn(role=role, content=content))
+            if parsed_turns:
+                conversations[str(chat_id)] = parsed_turns
+        self._conversations = conversations
 
     def save(self) -> None:
         """将当前内存状态持久化到 JSON 文件"""
@@ -44,6 +60,7 @@ class ConversationStore:
             chat_id: [turn.to_dict() for turn in turns]
             for chat_id, turns in self._conversations.items()
         }
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
 
     def append_turn(self, chat_id: int, role: str, content: str) -> None:

@@ -14,36 +14,73 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _empty_payload() -> dict[str, Any]:
+    """返回 sessions.json 的空结构"""
+
+    return {"active": {}, "sessions": {}, "models": {}}
+
+
 class SessionStore:
     """管理每个 Telegram chat 对应的 Copilot 会话列表与当前会话"""
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
-        self._payload: dict[str, dict] = {"active": {}, "sessions": {}}
+        self._payload: dict[str, Any] = _empty_payload()
         self._load()
 
     def _load(self) -> None:
         if not self._db_path.exists():
-            self._payload = {"active": {}, "sessions": {}}
+            self._payload = _empty_payload()
             return
         raw = self._db_path.read_text(encoding="utf-8").strip()
         if not raw:
-            self._payload = {"active": {}, "sessions": {}}
+            self._payload = _empty_payload()
             return
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
-            payload = {"active": {}, "sessions": {}}
+            payload = _empty_payload()
         if not isinstance(payload, dict):
-            payload = {"active": {}, "sessions": {}}
-        payload.setdefault("active", {})
-        payload.setdefault("sessions", {})
-        payload.setdefault("models", {})
-        self._payload = payload
+            payload = _empty_payload()
+
+        active_raw = payload.get("active")
+        active = {
+            str(chat_id): session_id
+            for chat_id, session_id in active_raw.items()
+            if isinstance(session_id, str) and session_id
+        } if isinstance(active_raw, dict) else {}
+
+        sessions_raw = payload.get("sessions")
+        sessions: dict[str, list[dict[str, Any]]] = {}
+        if isinstance(sessions_raw, dict):
+            for chat_id, items in sessions_raw.items():
+                if not isinstance(items, list):
+                    continue
+                cleaned_items: list[dict[str, Any]] = []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    session_id = str(item.get("id") or "").strip()
+                    if not session_id:
+                        continue
+                    cleaned = dict(item)
+                    cleaned["id"] = session_id
+                    cleaned_items.append(cleaned)
+                sessions[str(chat_id)] = cleaned_items
+
+        models_raw = payload.get("models")
+        models = {
+            str(chat_id): model
+            for chat_id, model in models_raw.items()
+            if isinstance(model, str) and model
+        } if isinstance(models_raw, dict) else {}
+
+        self._payload = {"active": active, "sessions": sessions, "models": models}
 
     def save(self) -> None:
         """写回 JSON 文件"""
 
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_path.write_text(json.dumps(self._payload, ensure_ascii=True, indent=2), encoding="utf-8")
 
     def _chat_key(self, chat_id: int) -> str:
@@ -76,7 +113,7 @@ class SessionStore:
     def active_session(self, chat_id: int) -> str | None:
         key = self._chat_key(chat_id)
         value = self._payload["active"].get(key)
-        if isinstance(value, str) and value:
+        if isinstance(value, str) and value and self._find_session(chat_id, value):
             return value
         return None
 

@@ -43,7 +43,9 @@ class CopilotSessionInspector:
         return infos[:limit]
 
     def get_session(self, session_id: str) -> CopilotSessionInfo | None:
-        folder = self._root / session_id
+        folder = self._session_folder(session_id)
+        if folder is None:
+            return None
         if not folder.exists() or not folder.is_dir():
             return None
 
@@ -73,7 +75,9 @@ class CopilotSessionInspector:
         )
 
     def delete_session(self, session_id: str) -> bool:
-        folder = self._root / session_id
+        folder = self._session_folder(session_id)
+        if folder is None:
+            return False
         if not folder.exists() or not folder.is_dir():
             return False
         for child in sorted(folder.rglob("*"), reverse=True):
@@ -83,6 +87,21 @@ class CopilotSessionInspector:
                 child.rmdir()
         folder.rmdir()
         return True
+
+    def _session_folder(self, session_id: str) -> Path | None:
+        """把 session_id 限定为 session-state 根目录下的直接子目录名"""
+
+        name = session_id.strip()
+        if not name:
+            return None
+        candidate_name = Path(name)
+        if candidate_name.is_absolute() or candidate_name.name != name:
+            return None
+        root = self._root.expanduser().resolve()
+        folder = (root / name).resolve()
+        if folder == root or root not in folder.parents:
+            return None
+        return folder
 
 
 def _parse_workspace_yaml(path: Path) -> dict[str, str]:

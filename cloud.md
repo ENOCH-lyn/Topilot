@@ -8,7 +8,7 @@ Topilot 当前采用单节点自托管部署模式，不依赖自建云端推理
 ### 2.1 推荐运行环境
 1. Windows 10/11 或 Windows Server 主机。
 2. Python 3.11 及以上。
-3. PowerShell 6+。
+3. Windows PowerShell 或 PowerShell 6+。
 4. 已安装并完成 `copilot login` 的 GitHub Copilot CLI。
 5. 稳定的 Telegram API 网络连通性；如有网络限制，可通过 `telegram.proxy_url` 配置代理。
 
@@ -47,7 +47,7 @@ Topilot 进程（python-telegram-bot 长轮询）
 3. 如启用代理，代理地址必须只在配置文件中维护，不得写死在启动脚本内。
 
 ## 5. 标准部署流程
-1. 在目标主机安装 Python 3.11+ 与 PowerShell 6+。
+1. 在目标主机安装 Python 3.11+ 与可用的 Windows PowerShell 或 PowerShell 6+。
 2. 安装并验证 Copilot CLI，执行 `copilot login` 完成登录。
 3. 拉取仓库代码，在项目根目录执行 `pip install -e .`。
 4. 执行 `topilot init` 初始化配置，填写 Bot Token、允许访问的 Chat ID、Copilot CLI 命令、默认模型、默认工作区。

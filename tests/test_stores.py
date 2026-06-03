@@ -24,6 +24,33 @@ def test_conversation_store_trims_history_and_persists(tmp_path: Path) -> None:
     assert [turn.content for turn in turns] == ["a1", "u2", "a2"]
 
 
+def test_conversation_store_skips_malformed_persisted_turns_and_creates_parent_dir(tmp_path: Path) -> None:
+    db_path = tmp_path / "nested" / "chats.json"
+    db_path.parent.mkdir()
+    db_path.write_text(
+        """
+        {
+          "42": [
+            {"role": "user", "content": "valid", "created_at": "2026-05-03T10:00:00Z"},
+            {"role": "assistant"},
+            "bad"
+          ],
+          "bad-chat": "not-a-list"
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    store = ConversationStore(db_path)
+    assert [turn.content for turn in store.recent(42)] == ["valid"]
+
+    missing_parent_path = tmp_path / "new-parent" / "chats.json"
+    new_store = ConversationStore(missing_parent_path)
+    new_store.append_turn(100, "user", "hello")
+
+    assert missing_parent_path.exists()
+
+
 def test_session_store_tracks_active_session_and_model(tmp_path: Path) -> None:
     db_path = tmp_path / "sessions.json"
     store = SessionStore(db_path)
@@ -48,6 +75,40 @@ def test_session_store_tracks_active_session_and_model(tmp_path: Path) -> None:
     remaining = reloaded.list_sessions(100)
     assert [item["id"] for item in remaining] == [second]
     assert reloaded.active_model(100) == "gpt-5"
+
+
+def test_session_store_sanitizes_malformed_payload_and_stale_active_session(tmp_path: Path) -> None:
+    db_path = tmp_path / "nested" / "sessions.json"
+    db_path.parent.mkdir()
+    db_path.write_text(
+        """
+        {
+          "active": {"100": "missing-session", "bad": 42},
+          "sessions": {
+            "100": [
+              {"id": "valid-session", "title": "valid"},
+              {"title": "missing-id"},
+              "bad"
+            ],
+            "bad-chat": "not-a-list"
+          },
+          "models": {"100": "gpt-5", "bad": 42}
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    store = SessionStore(db_path)
+
+    assert store.active_session(100) is None
+    assert [item["id"] for item in store.list_sessions(100)] == ["valid-session"]
+    assert store.active_model(100) == "gpt-5"
+
+    missing_parent_path = tmp_path / "new-parent" / "sessions.json"
+    new_store = SessionStore(missing_parent_path)
+    new_store.create_session(100, title="created")
+
+    assert missing_parent_path.exists()
 
 
 def test_session_store_requires_unique_prefix_when_switching(tmp_path: Path) -> None:

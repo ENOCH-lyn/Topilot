@@ -38,7 +38,7 @@ copilot-in-telegram/
 │     ├─ task_runner.py           # Telegram 请求调度与业务编排
 │     └─ telegram_bot.py          # Telegram Bot 接入层、命令、按钮、流式展示
 ├─ tests/                         # pytest 测试目录，包含配置、存储、会话扫描、事件解析等基础测试
-├─ .env.example                   # 旧版环境变量配置示例（历史遗留文件）
+├─ .env.example                   # 旧版环境变量配置提示（历史遗留文件，不作为运行配置来源）
 ├─ .gitattributes
 ├─ .gitignore
 ├─ cloud.md                       # 云与部署规范

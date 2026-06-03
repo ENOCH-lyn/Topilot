@@ -63,3 +63,20 @@ def test_inspector_lists_by_latest_event_and_can_delete_session(tmp_path: Path) 
     assert [item.session_id for item in sessions[:2]] == ["session-b", "session-a"]
     assert inspector.delete_session("session-a") is True
     assert not first.exists()
+
+
+def test_inspector_rejects_path_like_session_ids(tmp_path: Path) -> None:
+    root = tmp_path / "session-state"
+    session_dir = root / "session-1"
+    session_dir.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    inspector = CopilotSessionInspector(root)
+
+    assert inspector.get_session("../outside") is None
+    assert inspector.get_session(outside.as_posix()) is None
+    assert inspector.delete_session("../outside") is False
+    assert inspector.delete_session(outside.as_posix()) is False
+    assert outside.exists()
+    assert session_dir.exists()

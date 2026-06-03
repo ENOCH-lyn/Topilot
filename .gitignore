@@ -35,3 +35,7 @@ Tips.md
 
 # Logs
 logs/
+
+# Local long-task records
+doc/LONG_TASK_STATE.md
+doc/LONG_TASK_BLOCKERS.md

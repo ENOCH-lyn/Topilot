@@ -37,7 +37,7 @@ Therefore, this project provides a way to connect GitHub Copilot CLI to a Telegr
 - Installed and executable `copilot` CLI
 - Completed `copilot login`
 - A Telegram Bot Token
-- PowerShell 6+ (`pwsh`)
+- Windows PowerShell or PowerShell
 
 ## Installation and Startup
 
@@ -53,6 +53,7 @@ Or run manually:
 
 ```powershell
 topilot init
+topilot doctor
 topilot start
 ```
 
@@ -76,11 +77,16 @@ Directory structure:
 Common configuration fields:
 
 - `telegram.bot_token`: Telegram bot token (required)
-- `telegram.allowed_chat_ids`: Telegram Chat IDs allowed to access the bot, separated by commas. If empty, all Chat IDs are allowed. It is strongly recommended to configure this for security.
+- `telegram.allowed_chat_ids`: Telegram Chat IDs allowed to access the bot, as an array or comma-separated string. If empty, all Chat IDs are allowed. It is strongly recommended to configure this for security.
 - `telegram.proxy_url`: Proxy URL for accessing the Telegram API when needed, e.g. `http://127.0.0.1:10808`
-- `topilot.cli_command`: Command used to run Copilot CLI, default is `copilot`
-- `topilot.model`: Default model used by Copilot CLI, default is `gpt-5-mini`
-- `topilot.timeout_seconds`: Timeout in seconds for a single call, default is `3600`
+- `copilot.cli_command`: Command used to run Copilot CLI, default is `copilot`
+- `copilot.model`: Default model used by Copilot CLI, default is `gpt-5-mini`
+- `copilot.available_models`: Fallback model candidates when live discovery fails
+- `copilot.timeout_seconds`: Timeout in seconds for a single call, default is `3600`
+- `copilot.allow_all_tools`: Whether to pass `--allow-all-tools` to Copilot CLI
+- `copilot.add_workspace_dir`: Whether to pass `--add-dir` automatically
+- `copilot.reasoning_effort`: Optional reasoning effort passed to Copilot CLI
+- `copilot.forward_reasoning`: Whether to forward reasoning text in the non-streaming path
 - `runtime.workspace_root`: Default workspace path
 - `runtime.session_watch_interval_seconds`: Polling interval for session takeover
 - `logging.log_level`: File log level
@@ -90,31 +96,39 @@ Common configuration fields:
 ## Available Bot Commands
 
 - `/whoami`: View current chat/user info
-- `/llm`: View Topilot backend status
+- `/llm`: View Copilot backend diagnostics, including command, resolved path, workspace, model, arguments, and issues
 - `/session_current`: View current session ID with a brief summary
 - `/sessions`: Session management entry (list/takeover/history/delete)
 - `/session_new [title]`: Create and switch to a new session
-- `/session_use <session_id_prefix>`: Switch session
+- `/session_use <session_id_prefix>`: Switch to a saved session or take over the uniquely matched local session
 - `/model`: View/switch current model
-- `/status`: View runtime status
+- `/status`: View backend status, current session, source, state, model, and workspace summary
 - Send text directly to start chatting
 
-## TODO
+## Current Scope
 
-- [ ] Improve output when taking over sessions
-- [ ] Continue improving tool result display
-- [ ] Add a memory layer to the default workspace to simulate tools like Openclaw
-- [ ] Support Copilot plugins
-- [ ] Improve interaction features, such as user options and command execution
-- [ ] Publish to PyPI for easier installation
-- [ ] Support Telegram shortcuts/quick commands
-- [ ] Deeper Copilot adaptation
-- [ ] Add image support
-- [ ] Add browser support
-- [ ] Add auto-start on boot
-- [ ] Improve configuration options and installation guides
-- [ ] Remove unused functionality (leftovers from vibe coding)
-- [ ] Resolve potential permission issues
+The repository now covers the core stage 1/2 scope:
+
+- Configuration initialization, config backups, and `doctor` diagnostics
+- Telegram commands, inline callbacks, Chat ID whitelist, and `/whoami`
+- Copilot CLI text conversations, JSON streaming replies, and tool progress summaries
+- Multi-session create/switch/delete, local `session-state` discovery, and takeover
+- Polling and refreshing a running local session
+- Model discovery, fallback candidates, button-based switching, and per-Chat persistence
+- A baseline pytest automation suite
+
+Out-of-scope for the current version: image/audio/file input, browser automation, plugin marketplace, enterprise permissions, multi-instance deployment, and database persistence.
+
+## Tests
+
+Install development dependencies and run:
+
+```powershell
+pip install -e ".[dev]"
+pytest
+```
+
+The baseline tests cover configuration, storage, local session scanning, Copilot event parsing, failure messages, Telegram authorization, command registration, model menus, and session callback rendering.
 
 ## License
 

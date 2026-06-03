@@ -4,7 +4,7 @@
 
 简体中文 | [English](./README-en.md)
 
-将  GitHub Copilot CLI 接入 Telegram Bot 使用
+将 GitHub Copilot CLI 接入 Telegram Bot 使用
 
 ## 运行截图
 
@@ -37,7 +37,7 @@ Openclaw等项目消耗Token速度普遍较快，但是很多功能在日常生�
 - 已安装并可执行的 `copilot` CLI
 - 已完成 `copilot login`
 - 拥有Telegram Bot Token
-- Powershell 6+ (pwsh)
+- Windows PowerShell 或 PowerShell
 
 ## 安装与启动
 
@@ -47,7 +47,7 @@ Openclaw等项目消耗Token速度普遍较快，但是很多功能在日常生�
 pip install -e .
 ```
 
-待安装成功后执行`topilot`即可运行
+待安装成功后执行 `topilot` 即可运行
 
 首次运行会自动进入交互式配置向导，生成默认配置文件 `~/.topilot/config.json`
 
@@ -55,6 +55,7 @@ pip install -e .
 
 ```powershell
 topilot init
+topilot doctor
 topilot start
 ```
 
@@ -78,7 +79,7 @@ topilot start
 常用配置字段
 
 - `telegram.bot_token`：Telegram 机器人令牌（必填）
-- `telegram.allowed_chat_ids`：允许访问的 Telegram Chat ID，多个用逗号分隔。留空代表允许所有 Chat ID 访问，强烈建议配置以保证安全
+- `telegram.allowed_chat_ids`：允许访问的 Telegram Chat ID，可使用数组或逗号分隔字符串。留空代表允许所有 Chat ID 访问，强烈建议配置以保证安全
 - `telegram.proxy_url`：如需使用代理访问 Telegram API，需要设置代理 URL，例如 `http://127.0.0.1:10808`
 - `copilot.cli_command`：运行 Copilot CLI 所需的命令，默认 `copilot`
 - `copilot.model`：Copilot CLI 默认使用的模型，默认为 `gpt-5-mini`
@@ -106,22 +107,30 @@ topilot start
 - `/status`：查看后端状态、当前会话、来源、状态、模型和工作区摘要
 - 直接发送文本将进入对话
 
-## 待办
+## 当前完成范围
 
-- [ ] 优化接管session时的输出
-- [ ] 继续优化工具展示结果
-- [ ] 默认工作区可以加入记忆层来模拟openclaw等工具
-- [ ] 支持copilot插件
-- [ ] 增强交互功能，例如用户选项，运行执行命令等功能
-- [ ] pip库上传，方便安装
-- [ ] 支持telegram快捷命令
-- [ ] 更深层次的copilot适配
-- [ ] 图片功能支持
-- [ ] 浏览器支持
-- [ ] 开机自启
-- [ ] 完善配置选项，安装教程等
-- [ ] 删除无用功能（vibe coding残留）
-- [ ] 解决有可能的权限问题
+当前仓库已完成课程阶段 1/2 的核心范围：
+
+- 配置初始化、覆盖备份、启动前 `doctor` 诊断
+- Telegram 命令、按钮回调、Chat ID 白名单和 `/whoami` 诊断
+- Copilot CLI 文本对话、JSON 流式回复和工具过程摘要
+- 多会话创建、切换、删除、本机 `session-state` 发现与接管
+- 运行中会话轮询追踪
+- 模型发现、回退候选、按钮切换和按 Chat 持久化
+- 基础 pytest 自动化测试套件
+
+不在当前版本范围内的能力包括图片/语音/文件输入、浏览器自动化、插件市场、企业级权限、多实例部署和数据库持久化。
+
+## 测试
+
+安装开发依赖后执行：
+
+```powershell
+pip install -e ".[dev]"
+pytest
+```
+
+当前仓库基础测试覆盖配置、存储、会话扫描、Copilot 事件解析、异常提示、Telegram 白名单、命令注册、模型菜单和会话回调渲染逻辑。
 
 ## License
 

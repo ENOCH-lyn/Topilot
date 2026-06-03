@@ -121,7 +121,10 @@ def _parse_chat_ids(value: object) -> set[int]:
             stripped = item.strip()
             if not stripped:
                 continue
-            result.add(int(stripped))
+            try:
+                result.add(int(stripped))
+            except ValueError:
+                continue
     return result
 
 
