@@ -110,35 +110,6 @@ topilot start
 
 Bot 启动时会自动向 Telegram 注册命令菜单；`/start`、`/help`、`/status`、`/model`、`/sessions`、`/session_current` 等入口也提供内联按钮，常用操作可直接点击完成。
 
-## 当前版本范围
-
-当前版本已实现：
-
-- 配置初始化、覆盖备份、启动前 `doctor` 诊断
-- Telegram 命令、按钮回调、Chat ID 白名单和 `/whoami` 诊断
-- Copilot CLI 文本对话、JSON 流式回复和工具过程摘要
-- 多会话创建、切换、删除、本机 `session-state` 发现与接管
-- 通过会话详情页对运行中会话进行轮询追踪
-- 模型发现、回退候选、按钮切换和按 Chat 持久化
-- 基础 pytest 自动化测试套件
-
-不在当前版本范围内的能力包括图片/语音/文件输入、浏览器自动化、插件市场、企业级权限、多实例部署和数据库持久化。
-
-## 测试
-
-安装开发依赖后执行：
-
-```powershell
-pip install -e ".[dev]"
-pytest
-```
-
-自动化测试覆盖配置、存储、会话扫描、Copilot 事件解析、异常提示、Telegram 白名单、命令注册、模型菜单和会话回调渲染逻辑。
-截至 2026-06-03，项目已完成真实 Telegram 外网联调与真实 Copilot CLI 集成联调，核心交互链路运行正常。
-
 ## License
 
 MIT License，详见 [LICENSE](./LICENSE)
-
-## 免责声明
-本项目定位为个人自托管工具，适用于个人可信环境。使用者需自行保护 Telegram Bot Token、Copilot 登录状态、本地工作区和访问白名单。项目不提供企业级隔离、审计或安全担保，因使用本项目产生的风险与后果由使用者自行承担。
