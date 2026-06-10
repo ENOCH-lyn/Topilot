@@ -88,7 +88,9 @@ topilot start
 - `copilot.available_models`：模型实时发现失败时使用的回退候选列表
 - `copilot.timeout_seconds`：单次调用超时秒数，默认为 3600
 - `copilot.allow_all_tools`：调用 Copilot CLI 时是否附带 `--allow-all-tools`
+- `copilot.allow_all_paths`：是否附带 `--allow-all-paths`，开启后允许访问任意路径，适合个人可信环境
 - `copilot.add_workspace_dir`：调用 Copilot CLI 时是否自动附带 `--add-dir`
+- `copilot.additional_allowed_dirs`：额外允许 Copilot 访问的目录列表；当需要读取工作区外目录时，在这里显式加入
 - `copilot.reasoning_effort`：传递给 Copilot CLI 的推理强度，可为空
 - `copilot.forward_reasoning`：是否在非流式路径转发思考文本
 - `runtime.workspace_root`：默认工作区路径

@@ -89,11 +89,17 @@ def test_write_config_creates_backup_when_content_changes(tmp_path: Path) -> Non
 
 def test_load_settings_reads_json_config_and_creates_runtime_dirs(tmp_path: Path) -> None:
     paths = build_app_paths(tmp_path / "app")
+    extra_dirs = [
+        "C:/sandbox/desktop",
+        "C:/sandbox/projects",
+    ]
     payload = default_config_payload(paths)
     payload["telegram"]["bot_token"] = "telegram-token"
     payload["telegram"]["allowed_chat_ids"] = [1001, 1002]
     payload["copilot"]["model"] = "gpt-5"
     payload["copilot"]["available_models"] = ["gpt-5", "gpt-5-mini"]
+    payload["copilot"]["allow_all_paths"] = True
+    payload["copilot"]["additional_allowed_dirs"] = extra_dirs
     payload["runtime"]["workspace_root"] = (tmp_path / "custom-workspace").as_posix()
 
     write_config(payload, paths.config_file)
@@ -104,6 +110,8 @@ def test_load_settings_reads_json_config_and_creates_runtime_dirs(tmp_path: Path
     assert settings.allowed_chat_ids == {1001, 1002}
     assert settings.copilot_cli_model == "gpt-5"
     assert settings.copilot_available_models == ["gpt-5", "gpt-5-mini"]
+    assert settings.copilot_cli_allow_all_paths is True
+    assert settings.copilot_additional_allowed_dirs == extra_dirs
     assert settings.workspace_root.exists()
     assert settings.chat_db_path.parent.exists()
     assert settings.session_db_path.parent.exists()

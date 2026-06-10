@@ -34,6 +34,23 @@ def _parse_models_array(value: object) -> list[str]:
     return result
 
 
+def _parse_string_list(value: object) -> list[str]:
+    """解析字符串列表，支持数组或逗号分隔字符串"""
+
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        trimmed = item.strip()
+        if trimmed:
+            result.append(trimmed)
+    return result
+
+
 @dataclass(slots=True)
 class Settings:
     """应用运行配置"""
@@ -48,7 +65,9 @@ class Settings:
     copilot_cli_model: str
     copilot_cli_timeout_seconds: int
     copilot_cli_allow_all_tools: bool
+    copilot_cli_allow_all_paths: bool
     copilot_cli_add_workspace_dir: bool
+    copilot_additional_allowed_dirs: list[str]
     copilot_cli_reasoning_effort: str | None
     copilot_cli_forward_reasoning: bool
     copilot_available_models: list[str]
@@ -207,7 +226,9 @@ def default_config_payload(paths: AppPaths) -> dict:
             "available_models": [],
             "timeout_seconds": 3600,
             "allow_all_tools": True,
+            "allow_all_paths": False,
             "add_workspace_dir": True,
+            "additional_allowed_dirs": [],
             "reasoning_effort": None,
             "forward_reasoning": True,
         },
@@ -360,7 +381,9 @@ def load_settings(app_home: Path | None = None) -> Settings:
         copilot_cli_model=(str(copilot.get("model") or "gpt-5-mini").strip() or "gpt-5-mini"),
         copilot_cli_timeout_seconds=_parse_int(copilot.get("timeout_seconds"), 3600),
         copilot_cli_allow_all_tools=_parse_bool(copilot.get("allow_all_tools"), True),
+        copilot_cli_allow_all_paths=_parse_bool(copilot.get("allow_all_paths"), False),
         copilot_cli_add_workspace_dir=_parse_bool(copilot.get("add_workspace_dir"), True),
+        copilot_additional_allowed_dirs=_parse_string_list(copilot.get("additional_allowed_dirs")),
         copilot_cli_reasoning_effort=(str(copilot.get("reasoning_effort") or "").strip() or None),
         copilot_cli_forward_reasoning=_parse_bool(copilot.get("forward_reasoning"), True),
         copilot_available_models=_parse_models_array(copilot.get("available_models")),

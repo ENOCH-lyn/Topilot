@@ -985,9 +985,11 @@ class AssistantPlanner:
         ]
         if self._settings.copilot_cli_reasoning_effort:
             base_args.extend(["--reasoning-effort", self._settings.copilot_cli_reasoning_effort])
-        if self._settings.copilot_cli_add_workspace_dir:
-            add_dir = workspace_dir or self._settings.workspace_root.as_posix()
-            base_args.extend(["--add-dir", add_dir])
+        if self._settings.copilot_cli_allow_all_paths:
+            base_args.append("--allow-all-paths")
+        else:
+            for add_dir in self._allowed_dirs_for_command(workspace_dir):
+                base_args.extend(["--add-dir", add_dir])
         if command.lower().endswith(".ps1"):
             return [
                 "powershell",
@@ -1040,6 +1042,27 @@ class AssistantPlanner:
         if fallback_ps1.exists():
             return fallback_ps1.as_posix()
         return configured or "copilot"
+
+    def _allowed_dirs_for_command(self, workspace_dir: str | None = None) -> list[str]:
+        """返回本次 Copilot CLI 调用允许访问的目录列表"""
+
+        candidates: list[str] = []
+        if self._settings.copilot_cli_add_workspace_dir:
+            candidates.append(workspace_dir or self._settings.workspace_root.as_posix())
+        candidates.extend(self._settings.copilot_additional_allowed_dirs)
+
+        allowed_dirs: list[str] = []
+        seen: set[str] = set()
+        for item in candidates:
+            normalized = str(item).strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            allowed_dirs.append(normalized)
+        return allowed_dirs
 
     def _command_is_runnable(self, command: str) -> bool:
         """判断解析后的命令是否能在当前系统中启动"""

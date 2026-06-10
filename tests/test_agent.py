@@ -9,10 +9,12 @@ from topilot.agent import AssistantPlanner, CopilotCliDiagnostic, StreamState
 def test_build_copilot_argv_keeps_session_id_model_and_workspace(make_settings, monkeypatch, tmp_path) -> None:
     workspace = tmp_path / "workspace-a"
     workspace.mkdir()
+    extra_dir = "C:/sandbox/desktop"
     planner = AssistantPlanner(
         make_settings(
             copilot_cli_command="copilot.bat",
             copilot_cli_reasoning_effort="high",
+            copilot_additional_allowed_dirs=[extra_dir],
         )
     )
     monkeypatch.setattr(planner, "_resolve_copilot_command", lambda: "copilot.bat")
@@ -34,8 +36,45 @@ def test_build_copilot_argv_keeps_session_id_model_and_workspace(make_settings, 
     assert "high" in argv
     assert "--add-dir" in argv
     assert workspace.as_posix() in argv
+    assert extra_dir in argv
     prompt_value = argv[argv.index("-p") + 1]
     assert prompt_value == r"line1\nline2"
+
+
+def test_build_copilot_argv_uses_allow_all_paths_when_enabled(make_settings, monkeypatch) -> None:
+    extra_dir = "C:/sandbox/desktop"
+    planner = AssistantPlanner(
+        make_settings(
+            copilot_cli_command="copilot.bat",
+            copilot_cli_allow_all_paths=True,
+            copilot_additional_allowed_dirs=[extra_dir],
+        )
+    )
+    monkeypatch.setattr(planner, "_resolve_copilot_command", lambda: "copilot.bat")
+
+    argv = planner._build_copilot_argv("hello", "session-123", model="gpt-5")
+
+    assert "--allow-all-paths" in argv
+    assert "--add-dir" not in argv
+
+
+def test_allowed_dirs_for_command_deduplicates_paths(make_settings) -> None:
+    workspace_dir = "C:/sandbox/project"
+    extra_dir = "C:/sandbox/desktop"
+    planner = AssistantPlanner(
+        make_settings(
+            copilot_additional_allowed_dirs=[
+                extra_dir,
+                extra_dir,
+                "   ",
+            ]
+        )
+    )
+
+    assert planner._allowed_dirs_for_command(workspace_dir) == [
+        workspace_dir,
+        extra_dir,
+    ]
 
 
 def test_stream_events_map_tool_logs_and_reply_deltas(make_settings) -> None:

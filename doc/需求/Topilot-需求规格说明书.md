@@ -99,11 +99,12 @@ Topilot 当前需求拆分为五个核心模块：
 #### 7.3.2 结构化需求
 1. 系统应使用当前会话 ID 调用 Copilot CLI，确保上下文连续性。
 2. 系统应支持为每个 Chat 保存当前模型并在调用时生效。
-3. 系统应支持配置超时时间、推理强度、是否自动附带工作区目录、是否允许全部工具。
-4. 系统应把 `assistant.message_delta` 实时刷新到 Telegram 回复消息中。
-5. 系统应把 `tool.execution_start`、`tool.execution_complete` 等事件转为中文摘要日志。
-6. 系统应过滤 `session.tools_updated`、`subagent.completed` 等低价值噪声事件。
-7. 当 Copilot CLI 失败、超时、返回空结果或未就绪时，系统应给出明确失败提示。
+3. 系统应支持配置超时时间、推理强度、是否自动附带工作区目录、是否允许全部工具、是否允许访问任意路径。
+4. 系统应支持通过配置显式追加额外允许访问目录，用于在保持默认工作区边界的前提下访问工作区外文件。
+5. 系统应把 `assistant.message_delta` 实时刷新到 Telegram 回复消息中。
+6. 系统应把 `tool.execution_start`、`tool.execution_complete` 等事件转为中文摘要日志。
+7. 系统应过滤 `session.tools_updated`、`subagent.completed` 等低价值噪声事件。
+8. 当 Copilot CLI 失败、超时、返回空结果或未就绪时，系统应给出明确失败提示。
 
 ### 7.4 会话管理与接管模块
 

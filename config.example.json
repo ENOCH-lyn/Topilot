@@ -12,7 +12,9 @@
     "available_models": [],
     "timeout_seconds": 3600,
     "allow_all_tools": true,
+    "allow_all_paths": false,
     "add_workspace_dir": true,
+    "additional_allowed_dirs": [],
     "reasoning_effort": null,
     "forward_reasoning": true
   },

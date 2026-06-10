@@ -175,7 +175,9 @@
 | `copilot` | `available_models` | array[string] | 模型回退列表 |
 | `copilot` | `timeout_seconds` | int | 调用超时 |
 | `copilot` | `allow_all_tools` | bool | 是否允许所有工具 |
+| `copilot` | `allow_all_paths` | bool | 是否允许访问任意路径 |
 | `copilot` | `add_workspace_dir` | bool | 是否自动附带 `--add-dir` |
+| `copilot` | `additional_allowed_dirs` | array[string] | 额外允许访问的目录列表 |
 | `copilot` | `reasoning_effort` | string/null | 推理强度 |
 | `copilot` | `forward_reasoning` | bool | 是否转发思考文本 |
 | `runtime` | `workspace_root` | string | 默认工作区 |
