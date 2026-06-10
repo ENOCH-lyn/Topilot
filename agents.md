@@ -47,6 +47,7 @@ copilot-in-telegram/
 ├─ designer.md                    # Telegram 交互风格约束
 ├─ LICENSE
 ├─ pyproject.toml                 # Python 包与依赖声明
+├─ README-en.md
 ├─ README.md
 └─ Tips.md                        # 本地个人记录，不作为正式文档依据
 ```

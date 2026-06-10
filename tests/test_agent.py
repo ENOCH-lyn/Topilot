@@ -116,32 +116,6 @@ def test_stream_events_map_tool_logs_and_reply_deltas(make_settings) -> None:
     assert reply_events[0].text == "测试回复"
 
 
-def test_stream_events_capture_pending_ask_user_prompt_and_options(make_settings) -> None:
-    planner = AssistantPlanner(make_settings())
-    state = StreamState()
-
-    start_events = planner._stream_events_from_item(
-        {
-            "type": "tool.execution_start",
-            "data": {
-                "toolName": "ask_user",
-                "toolCallId": "call-ask",
-                "arguments": {
-                    "question": "Allow reading Desktop?",
-                    "options": ["Allow", "Deny"],
-                },
-            },
-        },
-        state,
-    )
-
-    assert start_events[0].kind == "log"
-    assert start_events[0].text == "等待用户确认：Allow reading Desktop?"
-    assert state.pending_user_input is not None
-    assert state.pending_user_input.question == "Allow reading Desktop?"
-    assert state.pending_user_input.options == ["Allow", "Deny"]
-    assert state.pending_user_input.kind == "permission_request"
-
 def test_fetch_available_models_falls_back_to_configured_models(make_settings, monkeypatch) -> None:
     planner = AssistantPlanner(make_settings(copilot_available_models=["gpt-5", "gpt-5-mini"]))
 
@@ -514,7 +488,6 @@ def test_tool_formatting_helpers_cover_specialized_outputs(make_settings) -> Non
     assert planner._format_tool_start("task", {"agent_type": "reader", "description": "scan logs"}) == "启动子任务（agent=reader）：scan logs"
     assert planner._format_tool_start("web_fetch", {"url": "https://example.com"}) == "读取资源：https://example.com"
     assert planner._format_tool_start("fetch_copilot_cli_documentation", {}) == "获取 Copilot CLI 文档"
-    assert planner._format_tool_start("ask_user", {"question": "是否继续？", "options": ["继续", "取消"]}) == "等待用户确认：是否继续？"
 
     assert planner._format_tool_success("list_powershell", {}, {"result": {"content": "alpha\nbeta"}}).startswith("PowerShell 会话列表 | 共 2 条")
     assert planner._format_tool_success("grep", {"query": "bot"}, {"result": {"content": "a\nb\nc"}}).startswith("代码检索结果（query=bot）")
@@ -562,25 +535,12 @@ def test_json_text_and_runtime_helpers_cover_nested_and_fallback_inputs(make_set
     assert planner._extract_delta_text({"content": {"chunk": "delta"}}) == "delta"
     assert planner._extract_tool_arguments('{"path":"src"}') == {"path": "src"}
     assert planner._extract_tool_arguments("{broken") == {}
-    pending = planner._extract_pending_user_input(
-        "ask_user",
-        {},
-        {
-            "result": {
-                "message": "Permission required to read Desktop. Allow or deny?",
-                "options": [{"label": "Allow"}, {"label": "Deny"}],
-            }
-        },
-    )
     assert planner._build_context_suffix({"path": "src", "glob": "*.py"}, [("path", "path"), ("glob", "glob")]) == "（path=src, glob=*.py）"
     assert planner._tool_name_has_any("run_in_terminal", {"run", "grep"}) is True
     assert planner._is_noisy_payload({"toolName": "report_intent"}) is True
     assert planner._is_noisy_payload({"message": "intent logged to store"}) is True
     assert planner._looks_like_tool_payload({"toolName": "grep"}) is True
     assert planner._extract_tool_result_text({"result": {"content": "payload"}}) == "payload"
-    assert pending is not None
-    assert pending.kind == "permission_request"
-    assert pending.options == ["Allow", "Deny"]
     assert planner._looks_like_file("src/topilot/agent.py") is True
     assert planner._looks_like_file("src/topilot") is False
     assert planner._parse_result_lines("first\r\n<exited with 0>\nsecond") == ["first", "second"]
@@ -591,6 +551,8 @@ def test_json_text_and_runtime_helpers_cover_nested_and_fallback_inputs(make_set
     assert planner._normalize_prompt_for_command("a\r\nb", "tool.cmd") == r"a\nb"
     assert planner._normalize_prompt_for_command("a\nb", "tool.py") == "a\nb"
     assert "建议: 执行 topilot doctor" in planner._format_cli_failure_message(RuntimeError("very bad"))
+
+
 def test_extract_copilot_jsonl_parts_and_text_parts(make_settings) -> None:
     planner = AssistantPlanner(make_settings())
     raw = """

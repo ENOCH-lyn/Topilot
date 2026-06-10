@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from topilot.models import PendingUserInput
-
 
 def _now_iso() -> str:
     """返回当前 UTC 时间（ISO8601）"""
@@ -19,7 +17,7 @@ def _now_iso() -> str:
 def _empty_payload() -> dict[str, Any]:
     """返回 sessions.json 的空结构"""
 
-    return {"active": {}, "sessions": {}, "models": {}, "pending": {}}
+    return {"active": {}, "sessions": {}, "models": {}}
 
 
 class SessionStore:
@@ -77,18 +75,7 @@ class SessionStore:
             if isinstance(model, str) and model
         } if isinstance(models_raw, dict) else {}
 
-        pending_raw = payload.get("pending")
-        pending: dict[str, dict[str, Any]] = {}
-        if isinstance(pending_raw, dict):
-            for chat_id, item in pending_raw.items():
-                if not isinstance(item, dict):
-                    continue
-                parsed = PendingUserInput.from_dict(item)
-                if not parsed.question:
-                    continue
-                pending[str(chat_id)] = parsed.to_dict()
-
-        self._payload = {"active": active, "sessions": sessions, "models": models, "pending": pending}
+        self._payload = {"active": active, "sessions": sessions, "models": models}
 
     def save(self) -> None:
         """写回 JSON 文件"""
@@ -237,10 +224,6 @@ class SessionStore:
         if self._payload.get("active", {}).get(key) == session_id:
             self._payload.setdefault("active", {}).pop(key, None)
             changed = True
-        pending = self.pending_user_input(chat_id)
-        if pending and pending.session_id == session_id:
-            self._payload.setdefault("pending", {}).pop(key, None)
-            changed = True
 
         if changed:
             self.save()
@@ -276,31 +259,4 @@ class SessionStore:
         """为指定 chat 保存模型选择"""
         key = self._chat_key(chat_id)
         self._payload.setdefault("models", {})[key] = model
-        self.save()
-
-    def pending_user_input(self, chat_id: int) -> PendingUserInput | None:
-        """返回当前 chat 等待用户补充的输入"""
-
-        key = self._chat_key(chat_id)
-        value = self._payload.get("pending", {}).get(key)
-        if not isinstance(value, dict):
-            return None
-        parsed = PendingUserInput.from_dict(value)
-        return parsed if parsed.question else None
-
-    def set_pending_user_input(self, chat_id: int, pending: PendingUserInput) -> None:
-        """保存当前 chat 的待回答问题"""
-
-        key = self._chat_key(chat_id)
-        self._payload.setdefault("pending", {})[key] = pending.to_dict()
-        self.save()
-
-    def clear_pending_user_input(self, chat_id: int) -> None:
-        """清除当前 chat 的待回答问题"""
-
-        key = self._chat_key(chat_id)
-        pending_map = self._payload.setdefault("pending", {})
-        if key not in pending_map:
-            return
-        pending_map.pop(key, None)
         self.save()

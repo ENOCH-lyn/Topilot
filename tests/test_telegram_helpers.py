@@ -4,7 +4,6 @@ import asyncio
 
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 
-from topilot.models import PendingUserInput
 from topilot.telegram_bot import (
     _bot_commands,
     _build_model_keyboard,
@@ -16,7 +15,6 @@ from topilot.telegram_bot import (
     _render_diagnostic_panel,
     _render_main_menu,
     _render_model_menu,
-    _render_pending_prompt,
     _render_session_current_panel,
     _render_session_delete_confirm,
     _render_session_detail,
@@ -93,24 +91,6 @@ def test_main_status_and_diagnostic_panels_have_navigation_buttons() -> None:
     assert diagnostic_keyboard[0][0].callback_data == "nav:diagnostic"
     assert current_text == "当前 Copilot 会话: abc"
     assert current_keyboard[0][0].callback_data == "nav:sessions"
-
-
-def test_render_pending_prompt_builds_option_buttons_and_navigation() -> None:
-    text, keyboard = _render_pending_prompt(
-        "Copilot 需要你确认权限。",
-        PendingUserInput(
-            kind="permission_request",
-            question="Allow reading Desktop?",
-            session_id="session-123",
-            options=["Allow", "Deny", "Cancel"],
-        ),
-    )
-
-    assert text == "Copilot 需要你确认权限。"
-    assert [button.callback_data for button in keyboard[0]] == ["pending:0", "pending:1"]
-    assert keyboard[1][0].callback_data == "pending:2"
-    assert [button.callback_data for button in keyboard[2]] == ["nav:status", "nav:session_current"]
-    assert keyboard[3][0].callback_data == "nav:main"
 
 
 def test_chunk_and_trim_helpers_keep_telegram_safe_lengths() -> None:
@@ -303,7 +283,6 @@ def test_build_application_registers_required_commands_callbacks_and_text_handle
     ]
     assert callback_patterns == [
         "^model_sel:",
-        "^pending:",
         "^nav:",
         r"^(smenu:|sopen:|suse:|shis:|sdel:|sdelok:)",
     ]

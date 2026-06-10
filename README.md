@@ -2,7 +2,7 @@
 <img width="100" src="./assets/logo.png">
 <h1 align="center">Topilot</h1></div>
 
-简体中文
+简体中文 | [English](./README-en.md)
 
 通过 Telegram Bot 使用 GitHub Copilot CLI
 
@@ -32,7 +32,6 @@ Topilot 将本地 GitHub Copilot CLI 桥接到 Telegram Bot，面向个人远程
 - 接管本机运行中的会话，并在会话详情页追踪历史刷新
 - 流式传输结果
 - 工具调用过程等展示
-- Copilot 询问用户或权限确认时，支持在 Telegram 中直接回复或点击按钮继续执行
 
 ## 环境要求
 
@@ -111,7 +110,7 @@ topilot start
 - `/status`：查看后端状态、当前会话、来源、状态、模型和工作区摘要，并可通过按钮打开后端诊断报告
 - 直接发送文本将进入对话
 
-Bot 启动时会自动向 Telegram 注册命令菜单；`/start`、`/status`、`/model`、`/sessions`、`/session_current` 等入口也提供内联按钮，常用操作可直接点击完成。若 Copilot CLI 在执行过程中触发用户补充信息或权限确认，Bot 会保留当前会话并提示直接回复文本，若存在候选项则同时提供确认按钮。
+Bot 启动时会自动向 Telegram 注册命令菜单；`/start`、`/status`、`/model`、`/sessions`、`/session_current` 等入口也提供内联按钮，常用操作可直接点击完成。
 
 ## License
 
