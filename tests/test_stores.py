@@ -5,7 +5,7 @@ from pathlib import Path
 
 from topilot.copilot_sessions import CopilotSessionInfo
 from topilot.conversation_store import ConversationStore
-from topilot.models import ActionType, PlannedAction
+from topilot.models import ActionType, PendingUserInput, PlannedAction
 from topilot.task_runner import TaskRunner
 from topilot.session_store import SessionStore
 
@@ -128,6 +128,30 @@ def test_session_store_requires_unique_prefix_when_switching(tmp_path: Path) -> 
     assert store.active_session(100) == first
 
 
+def test_session_store_persists_pending_user_input_and_clears_with_session_delete(tmp_path: Path) -> None:
+    db_path = tmp_path / "sessions.json"
+    store = SessionStore(db_path)
+
+    session_id = store.create_session(100, title="pending")
+    pending = PendingUserInput(
+        kind="permission_request",
+        question="Allow reading Desktop?",
+        session_id=session_id,
+        options=["Allow", "Deny"],
+    )
+    store.set_pending_user_input(100, pending)
+
+    reloaded = SessionStore(db_path)
+    persisted = reloaded.pending_user_input(100)
+
+    assert persisted is not None
+    assert persisted.question == "Allow reading Desktop?"
+    assert persisted.options == ["Allow", "Deny"]
+
+    assert reloaded.delete_session(100, session_id) is True
+    assert reloaded.pending_user_input(100) is None
+
+
 def test_task_runner_status_text_includes_model_source_workspace_and_state(make_settings, tmp_path: Path) -> None:
     fake_copilot = tmp_path / "copilot.cmd"
     fake_copilot.write_text("@echo off\n", encoding="utf-8")
@@ -160,6 +184,28 @@ def test_task_runner_status_text_includes_model_source_workspace_and_state(make_
     assert "当前模型: gpt-5" in text
     assert "工作区: C:/workspace/project-a" in text
     assert "最近活动: 2026-05-05T10:20:30Z" in text
+
+
+def test_task_runner_status_and_current_text_show_pending_question(make_settings) -> None:
+    settings = make_settings()
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    runner = TaskRunner(settings, _send_message)
+    session_id = runner._sessions.create_session(100, title="needs-confirm")
+    runner._sessions.set_pending_user_input(
+        100,
+        PendingUserInput(
+            kind="permission_request",
+            question="Allow reading Desktop?",
+            session_id=session_id,
+            options=["Allow", "Deny"],
+        ),
+    )
+
+    assert "待用户确认: Allow reading Desktop?" in runner.status_text(100)
+    assert "待用户确认: Allow reading Desktop?" in runner.session_current_text(100)
 
 
 def test_task_runner_llm_diagnostic_text_exposes_backend_health(make_settings, tmp_path: Path) -> None:
@@ -293,6 +339,82 @@ def test_task_runner_submit_persists_default_session_metadata(make_settings) -> 
     assert session_meta["model"] == "gpt-5-mini"
     assert session_meta["source"] == "bot"
     assert sent == [(100, "done")]
+
+
+def test_task_runner_submit_waits_for_user_input_and_persists_pending_state(make_settings) -> None:
+    settings = make_settings(copilot_cli_model="gpt-5-mini")
+    sent: list[tuple[int, str]] = []
+    pending_prompts: list[tuple[int, str, PendingUserInput]] = []
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        sent.append((chat_id, text))
+
+    async def _send_pending_prompt(chat_id: int, pending: PendingUserInput, text: str) -> None:
+        pending_prompts.append((chat_id, text, pending))
+
+    class FakePlanner:
+        async def plan(self, session_id, history, instruction, **kwargs):
+            return PlannedAction(
+                action_type=ActionType.WAIT_USER_INPUT,
+                summary="need-confirm",
+                assistant_message="Copilot 需要你补充信息或确认权限。",
+                pending_user_input=PendingUserInput(
+                    kind="permission_request",
+                    question="Allow reading Desktop?",
+                    options=["Allow", "Deny"],
+                ),
+            )
+
+    runner = TaskRunner(settings, _send_message, send_pending_prompt=_send_pending_prompt)
+    runner._planner = FakePlanner()
+
+    asyncio.run(runner.submit(100, "read desktop"))
+
+    pending = runner.pending_user_input(100)
+    assert pending is not None
+    assert pending.session_id
+    assert pending.question == "Allow reading Desktop?"
+    assert pending_prompts and pending_prompts[0][0] == 100
+    assert pending_prompts[0][1] == "Copilot 需要你补充信息或确认权限。"
+    assert sent == []
+
+
+def test_task_runner_submit_reuses_pending_session_for_follow_up_answer(make_settings) -> None:
+    settings = make_settings(copilot_cli_model="gpt-5-mini")
+    sent: list[tuple[int, str]] = []
+    calls: list[tuple[str, str]] = []
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        sent.append((chat_id, text))
+
+    runner = TaskRunner(settings, _send_message)
+    session_id = runner._sessions.create_session(100, title="needs-confirm")
+    runner._sessions.set_pending_user_input(
+        100,
+        PendingUserInput(
+            kind="permission_request",
+            question='Allow reading "C:/Users/ENOCH/Desktop"?',
+            session_id=session_id,
+            options=["Allow", "Deny"],
+        ),
+    )
+
+    class FakePlanner:
+        async def plan(self, actual_session_id, history, instruction, **kwargs):
+            calls.append((actual_session_id, instruction))
+            return PlannedAction(
+                action_type=ActionType.RESPOND_ONLY,
+                summary="done",
+                assistant_message="已继续执行",
+            )
+
+    runner._planner = FakePlanner()
+
+    asyncio.run(runner.submit(100, "Allow"))
+
+    assert calls == [(session_id, "Allow")]
+    assert runner.pending_user_input(100) is None
+    assert sent == [(100, "已继续执行")]
 
 
 def test_task_runner_session_use_reports_ambiguous_stored_prefix(make_settings) -> None:

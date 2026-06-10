@@ -9,9 +9,11 @@ from topilot.agent import AssistantPlanner
 from topilot.copilot_sessions import CopilotSessionInfo, CopilotSessionInspector
 from topilot.config import Settings
 from topilot.conversation_store import ConversationStore
+from topilot.models import ActionType, PendingUserInput
 from topilot.session_store import SessionStore
 
 SendMessage = Callable[[int, str], Awaitable[None]]
+SendPendingPrompt = Callable[[int, PendingUserInput, str], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +34,17 @@ OpenLiveProgress = Callable[[int, str], Awaitable[LiveProgress]]
 class TaskRunner:
     """Telegram 消息到 Copilot CLI 的调度器"""
 
-    def __init__(self, settings: Settings, send_message: SendMessage, open_live_progress: OpenLiveProgress | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        send_message: SendMessage,
+        open_live_progress: OpenLiveProgress | None = None,
+        send_pending_prompt: SendPendingPrompt | None = None,
+    ) -> None:
         self._settings = settings
         self._send_message = send_message
         self._open_live_progress = open_live_progress
+        self._send_pending_prompt = send_pending_prompt
         self._conversation = ConversationStore(settings.chat_db_path)
         self._sessions = SessionStore(settings.session_db_path)
         self._planner = AssistantPlanner(settings)
@@ -165,6 +174,10 @@ class TaskRunner:
         running = info.running if info else bool(stored.get("running") if stored else False)
         stamp = (info.last_event_at if info else None) or (stored.get("last_event_at") if stored else None) or "-"
         active = self._sessions.active_session(chat_id)
+        pending = self._sessions.pending_user_input(chat_id)
+        pending_text = ""
+        if pending and pending.session_id == session_id:
+            pending_text = f"\n待用户确认: {pending.question}"
         return (
             f"会话: {session_id}\n"
             f"状态: {'运行中' if running else '空闲'}\n"
@@ -172,6 +185,7 @@ class TaskRunner:
             f"工作区: {cwd}\n"
             f"最后事件: {stamp}\n"
             f"当前激活: {'是' if active == session_id else '否'}"
+            f"{pending_text}"
         )
 
     def session_history_text(self, chat_id: int, session_id: str) -> str:
@@ -218,28 +232,45 @@ class TaskRunner:
         """处理一次用户请求并回传结果"""
 
         logger.info("收到请求 chat_id=%s instruction_len=%s", chat_id, len(instruction.strip()))
+        pending = self._sessions.pending_user_input(chat_id)
+        if pending and pending.session_id:
+            logger.info("继续待确认请求 chat_id=%s session=%s kind=%s", chat_id, pending.session_id, pending.kind)
+            await self._submit_for_session(chat_id, instruction, pending.session_id, pending_before=pending)
+            return
 
-        history = self._conversation.recent(chat_id)
         active_session_id = self._sessions.ensure_active_session(chat_id)
-        self._sessions.touch(chat_id, active_session_id)
+        await self._submit_for_session(chat_id, instruction, active_session_id, pending_before=None)
+
+    async def _submit_for_session(
+        self,
+        chat_id: int,
+        instruction: str,
+        session_id: str,
+        pending_before: PendingUserInput | None,
+    ) -> None:
+        history = self._conversation.recent(chat_id)
+        self._sessions.touch(chat_id, session_id)
 
         live_progress = await self._start_live_progress(chat_id, instruction)
         model = self._sessions.active_model(chat_id)
-        active_session_meta = self._sessions.get_session(chat_id, active_session_id) or {}
-        workspace_dir = str(active_session_meta.get("cwd", "")).strip() or None
+        session_meta = self._sessions.get_session(chat_id, session_id) or {}
+        workspace_dir = str(session_meta.get("cwd", "")).strip() or None
         effective_model = model or self._settings.copilot_cli_model
         effective_workspace = workspace_dir or self._settings.workspace_root.as_posix()
         self._sessions.upsert_session(
             chat_id,
-            active_session_id,
-            title=str(active_session_meta.get("title") or "default"),
+            session_id,
+            title=str(session_meta.get("title") or "default"),
             cwd=effective_workspace,
             model=effective_model,
-            source=str(active_session_meta.get("source") or "bot"),
+            source=str(session_meta.get("source") or "bot"),
         )
+        if self._sessions.active_session(chat_id) != session_id:
+            self._sessions.set_active_exact(chat_id, session_id)
+
         try:
             plan = await self._planner.plan(
-                active_session_id,
+                session_id,
                 history,
                 instruction,
                 model=effective_model,
@@ -248,7 +279,7 @@ class TaskRunner:
                 reply_streamer=live_progress.reply if live_progress else None,
             )
         except Exception:
-            logger.exception("请求处理失败 chat_id=%s session=%s", chat_id, active_session_id)
+            logger.exception("请求处理失败 chat_id=%s session=%s", chat_id, session_id)
             if live_progress:
                 await live_progress.close(failed=True)
             raise
@@ -259,6 +290,26 @@ class TaskRunner:
             await self._send_message(chat_id, f"[思考过程]\n{plan.reasoning_message}")
 
         reply = plan.assistant_message or self._planner.fallback_response()
+
+        if plan.action_type == ActionType.WAIT_USER_INPUT and plan.pending_user_input is not None:
+            pending_now = plan.pending_user_input
+            if not pending_now.session_id:
+                pending_now = PendingUserInput(
+                    kind=pending_now.kind,
+                    question=pending_now.question,
+                    session_id=session_id,
+                    options=list(pending_now.options),
+                    created_at=pending_now.created_at,
+                )
+            self._sessions.set_pending_user_input(chat_id, pending_now)
+            self._conversation.append_turn(chat_id, "assistant", reply)
+            await self._send_waiting_prompt(chat_id, reply, pending_now, live_progress)
+            logger.info("请求等待用户补充 chat_id=%s session=%s kind=%s", chat_id, session_id, pending_now.kind)
+            return
+
+        if pending_before is not None:
+            self._sessions.clear_pending_user_input(chat_id)
+
         self._conversation.append_turn(chat_id, "assistant", reply)
 
         if live_progress:
@@ -266,7 +317,25 @@ class TaskRunner:
         else:
             await self._send_message(chat_id, reply)
 
-        logger.info("请求处理完成 chat_id=%s session=%s reply_len=%s", chat_id, active_session_id, len(reply))
+        logger.info("请求处理完成 chat_id=%s session=%s reply_len=%s", chat_id, session_id, len(reply))
+
+    async def _send_waiting_prompt(
+        self,
+        chat_id: int,
+        text: str,
+        pending: PendingUserInput,
+        live_progress: LiveProgress | None,
+    ) -> None:
+        if self._send_pending_prompt is not None:
+            if live_progress:
+                await live_progress.close()
+            await self._send_pending_prompt(chat_id, pending, text)
+            return
+
+        if live_progress:
+            await live_progress.close(final_text=text)
+            return
+        await self._send_message(chat_id, text)
 
     async def _start_live_progress(self, chat_id: int, instruction: str) -> LiveProgress | None:
         """按需创建流式展示对象"""
@@ -289,6 +358,8 @@ class TaskRunner:
         workspace = str(session_meta.get("cwd") or self._settings.workspace_root.as_posix())
         title = str(session_meta.get("title") or "session")
         last_event_at = str(session_meta.get("last_event_at") or session_meta.get("last_used_at") or "-")
+        pending = self._sessions.pending_user_input(chat_id)
+        pending_text = f"\n待用户确认: {pending.question}" if pending else ""
         return (
             f"后端状态: {self._planner.llm_status_text(model)}\n"
             f"当前会话: {session_id}\n"
@@ -298,6 +369,7 @@ class TaskRunner:
             f"当前模型: {model}\n"
             f"工作区: {workspace}\n"
             f"最近活动: {last_event_at}"
+            f"{pending_text}"
         )
 
     def llm_status_text(self, chat_id: int | None = None) -> str:
@@ -337,6 +409,8 @@ class TaskRunner:
         running = bool(session_meta.get("running", False))
         workspace = str(session_meta.get("cwd") or self._settings.workspace_root.as_posix())
         title = str(session_meta.get("title") or "session")
+        pending = self._sessions.pending_user_input(chat_id)
+        pending_text = f"\n待用户确认: {pending.question}" if pending else ""
         return (
             f"当前 Copilot 会话: {session_id}\n"
             f"会话标题: {title}\n"
@@ -344,6 +418,7 @@ class TaskRunner:
             f"会话状态: {'运行中' if running else '空闲'}\n"
             f"当前模型: {model}\n"
             f"工作区: {workspace}"
+            f"{pending_text}"
         )
 
     def session_list_text(self, chat_id: int) -> str:
@@ -388,6 +463,11 @@ class TaskRunner:
         if len(local_matches) == 1:
             return self.takeover_session(chat_id, local_matches[0])
         return f"未找到会话: {session_id_prefix}"
+
+    def pending_user_input(self, chat_id: int) -> PendingUserInput | None:
+        """返回当前 chat 尚未完成的用户交互"""
+
+        return self._sessions.pending_user_input(chat_id)
 
     def _ambiguous_session_prefix_text(self, prefix: str, matches: list[str]) -> str:
         """返回前缀歧义提示"""

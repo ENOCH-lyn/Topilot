@@ -14,7 +14,7 @@ from pathlib import Path
 import asyncio
 
 from topilot.config import Settings
-from topilot.models import ActionType, ChatTurn, PlannedAction
+from topilot.models import ActionType, ChatTurn, PendingUserInput, PlannedAction
 
 URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
 
@@ -39,6 +39,7 @@ class StreamState:
 
     has_reply_delta_in_turn: bool = False
     tool_calls: dict[str, "ToolCallContext"] = field(default_factory=dict)
+    pending_user_input: PendingUserInput | None = None
 
 
 @dataclass(slots=True)
@@ -429,8 +430,16 @@ class AssistantPlanner:
             raise RuntimeError("Copilot CLI 返回空结果：stdout/stderr 均为空，请检查登录状态、命令路径和 --output-format json 支持")
 
         logger.info("Copilot CLI 调用完成 session=%s", session_id)
-
-        return self._parse_copilot_response(out_text)
+        action = self._parse_copilot_response(out_text)
+        if stream_state.pending_user_input is not None:
+            return PlannedAction(
+                action_type=ActionType.WAIT_USER_INPUT,
+                summary="等待用户输入",
+                assistant_message=self._render_pending_user_input_prompt(stream_state.pending_user_input),
+                reasoning_message=action.reasoning_message,
+                pending_user_input=stream_state.pending_user_input,
+            )
+        return action
 
     async def _forward_stdout_line(
         self,
@@ -570,6 +579,9 @@ class AssistantPlanner:
         arguments = self._extract_tool_arguments(data.get("arguments"))
         if tool_call_id and tool_name:
             stream_state.tool_calls[tool_call_id] = ToolCallContext(tool_name=tool_name, arguments=arguments)
+        pending = self._extract_pending_user_input(tool_name, arguments, data)
+        if pending is not None:
+            stream_state.pending_user_input = pending
         return self._format_tool_start(tool_name, arguments)
 
     def _summarize_tool_complete(self, data: object, stream_state: StreamState) -> str:
@@ -582,6 +594,10 @@ class AssistantPlanner:
 
         if tool_name in {"report_intent", "sql"}:
             return ""
+
+        pending = self._extract_pending_user_input(tool_name, arguments, data)
+        if pending is not None:
+            stream_state.pending_user_input = pending
 
         success = bool(data.get("success", True))
         if not success:
@@ -657,7 +673,10 @@ class AssistantPlanner:
             return "获取 Copilot CLI 文档"
 
         if tool_name in {"ask_user"}:
-            return "向用户提问"
+            pending = self._extract_pending_user_input(tool_name, arguments, {"arguments": arguments})
+            if pending and pending.question:
+                return "等待用户确认：" + self._shorten_single_line(pending.question, 160)
+            return "等待用户确认"
 
         if self._tool_name_has_any(tool_name, {"powershell", "terminal", "exec", "run"}):
             if command:
@@ -893,7 +912,238 @@ class AssistantPlanner:
             preferred = self._pick_first_string(result, ["content", "detailedContent", "message", "summary"])
             if preferred:
                 return preferred
-        return self._pick_first_string(data, ["message", "summary", "description"])
+            parts = self._extract_text_parts(result)
+            if parts:
+                return "\n".join(parts).strip()
+        preferred = self._pick_first_string(data, ["message", "summary", "description"])
+        if preferred:
+            return preferred
+        parts = self._extract_text_parts(data)
+        return "\n".join(parts).strip() if parts else ""
+
+    def _extract_pending_user_input(
+        self,
+        tool_name: str,
+        arguments: dict[str, object],
+        data: object,
+    ) -> PendingUserInput | None:
+        if tool_name != "ask_user":
+            return None
+
+        merged: dict[str, object] = {}
+        if isinstance(data, dict):
+            merged.update(data)
+            result = data.get("result")
+            if isinstance(result, dict):
+                merged.setdefault("result", result)
+        if arguments:
+            merged["arguments"] = arguments
+
+        question_sources: list[str] = []
+        question_sources.extend(
+            self._collect_strings_by_keys(
+                merged,
+                [
+                    "question",
+                    "prompt",
+                    "message",
+                    "description",
+                    "summary",
+                    "title",
+                    "body",
+                    "text",
+                    "detail",
+                    "instruction",
+                ],
+            )
+        )
+        if isinstance(merged.get("arguments"), dict):
+            question_sources.extend(
+                self._collect_strings_by_keys(
+                    merged.get("arguments"),
+                    [
+                        "question",
+                        "prompt",
+                        "message",
+                        "description",
+                        "summary",
+                        "title",
+                        "body",
+                        "text",
+                        "detail",
+                        "instruction",
+                    ],
+                )
+            )
+        result = merged.get("result")
+        if isinstance(result, dict):
+            question_sources.extend(
+                self._collect_strings_by_keys(
+                    result,
+                    [
+                        "question",
+                        "prompt",
+                        "message",
+                        "description",
+                        "summary",
+                        "title",
+                        "body",
+                        "text",
+                        "detail",
+                        "instruction",
+                    ],
+                )
+            )
+
+        question = ""
+        for candidate in question_sources:
+            normalized = self._clean_pending_prompt(candidate)
+            if normalized:
+                question = normalized
+                break
+
+        if not question:
+            fallback = self._clean_pending_prompt(self._extract_tool_result_text(merged))
+            question = fallback
+        if not question:
+            return None
+
+        options = self._extract_pending_options(merged)
+        inferred_options = self._infer_binary_options(question)
+        if not options and inferred_options:
+            options = inferred_options
+
+        kind = self._infer_pending_kind(question, merged)
+        return PendingUserInput(kind=kind, question=question, options=options)
+
+    def _extract_pending_options(self, data: object) -> list[str]:
+        if not isinstance(data, dict):
+            return []
+        keys = [
+            "options",
+            "choices",
+            "responses",
+            "allowedResponses",
+            "suggestedResponses",
+            "buttons",
+            "items",
+        ]
+        seen: set[str] = set()
+        result: list[str] = []
+        for key in keys:
+            value = data.get(key)
+            result.extend(self._normalize_pending_option_values(value, seen))
+
+        arguments = data.get("arguments")
+        if isinstance(arguments, dict):
+            for key in keys:
+                result.extend(self._normalize_pending_option_values(arguments.get(key), seen))
+
+        nested_result = data.get("result")
+        if isinstance(nested_result, dict):
+            for key in keys:
+                result.extend(self._normalize_pending_option_values(nested_result.get(key), seen))
+        return result
+
+    def _normalize_pending_option_values(self, value: object, seen: set[str]) -> list[str]:
+        values: list[str] = []
+        if isinstance(value, str):
+            normalized = self._clean_pending_prompt(value)
+            if normalized:
+                lowered = normalized.lower()
+                if lowered not in seen:
+                    seen.add(lowered)
+                    values.append(normalized)
+            return values
+
+        if not isinstance(value, list):
+            return values
+
+        for item in value:
+            option = ""
+            if isinstance(item, str):
+                option = item.strip()
+            elif isinstance(item, dict):
+                option = self._pick_first_string(item, ["label", "text", "title", "value", "message"])
+            if not option:
+                continue
+            normalized = self._clean_pending_prompt(option)
+            if not normalized:
+                continue
+            lowered = normalized.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            values.append(normalized)
+        return values
+
+    def _infer_pending_kind(self, question: str, data: object) -> str:
+        lowered = question.lower()
+        data_text = self._compact_json(data).lower() if data else ""
+        permission_tokens = ("permission", "approve", "approval", "consent", "allow", "授权", "权限", "确认", "允许", "批准")
+        if any(token in lowered for token in permission_tokens):
+            return "permission_request"
+        if any(token in data_text for token in permission_tokens):
+            return "permission_request"
+        return "ask_user"
+
+    def _infer_binary_options(self, question: str) -> list[str]:
+        lowered = question.lower()
+        binary_pairs = [
+            (("allow", "deny"), ["Allow", "Deny"]),
+            (("允许", "拒绝"), ["允许", "拒绝"]),
+            (("继续", "取消"), ["继续", "取消"]),
+            (("批准", "拒绝"), ["批准", "拒绝"]),
+            (("确认", "取消"), ["确认", "取消"]),
+            (("approve", "deny"), ["Approve", "Deny"]),
+            (("continue", "cancel"), ["Continue", "Cancel"]),
+            (("yes", "no"), ["Yes", "No"]),
+            (("是", "否"), ["是", "否"]),
+        ]
+        for tokens, options in binary_pairs:
+            if all(token in lowered for token in tokens):
+                return options
+        if any(token in lowered for token in ("是否", "要不要", "可否", "can i", "should i")):
+            return ["是", "否"]
+        return []
+
+    def _clean_pending_prompt(self, text: str) -> str:
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+        return normalized[:1000].strip()
+
+    def _collect_strings_by_keys(self, data: object, keys: list[str]) -> list[str]:
+        if not isinstance(data, dict):
+            return []
+        found: list[str] = []
+        seen: set[str] = set()
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                normalized = value.strip()
+                lowered = normalized.lower()
+                if lowered in seen:
+                    continue
+                seen.add(lowered)
+                found.append(normalized)
+            elif isinstance(value, dict):
+                nested = self._collect_strings_by_keys(value, keys)
+                for item in nested:
+                    lowered = item.lower()
+                    if lowered in seen:
+                        continue
+                    seen.add(lowered)
+                    found.append(item)
+        return found
+
+    def _render_pending_user_input_prompt(self, pending: PendingUserInput) -> str:
+        lines = ["Copilot 需要你补充信息或确认权限。", "", f"问题：{pending.question}"]
+        if pending.options:
+            lines.append("")
+            lines.append("可选项：" + " / ".join(pending.options))
+        lines.append("")
+        lines.append("请直接回复本条会话；如果下方有按钮，也可以直接点击。")
+        return "\n".join(lines)
 
     def _looks_like_file(self, path: str) -> bool:
         name = Path(path).name

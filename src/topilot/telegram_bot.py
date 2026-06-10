@@ -12,6 +12,7 @@ from telegram.error import BadRequest
 from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from topilot.config import Settings
+from topilot.models import PendingUserInput
 from topilot.task_runner import TaskRunner
 
 Handler = Callable[[Update, ContextTypes.DEFAULT_TYPE], Awaitable[None]]
@@ -416,11 +417,26 @@ def build_application(settings: Settings) -> Application:
         for chunk in _chunk_text(text):
             await application.bot.send_message(chat_id=chat_id, text=chunk)
 
+    async def send_pending_prompt(chat_id: int, pending: PendingUserInput, text: str) -> None:
+        if application is None:
+            return
+        prompt_text, keyboard = _render_pending_prompt(text, pending)
+        await application.bot.send_message(
+            chat_id=chat_id,
+            text=_trim_telegram_text(prompt_text),
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
     async def open_live_progress(chat_id: int, title: str) -> TelegramLiveProgress:
         progress = TelegramLiveProgress(chat_id, title)
         return await progress.start()
 
-    runner = TaskRunner(settings, send_message, open_live_progress=open_live_progress)
+    runner = TaskRunner(
+        settings,
+        send_message,
+        open_live_progress=open_live_progress,
+        send_pending_prompt=send_pending_prompt,
+    )
 
     async def on_startup(app: Application) -> None:
         await runner.start()
@@ -527,6 +543,45 @@ def build_application(settings: Settings) -> Application:
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         except Exception:
             pass
+
+    async def pending_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not query or not query.data:
+            return
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if not chat_id or not _is_allowed(settings, chat_id):
+            await query.answer("未授权", show_alert=True)
+            return
+
+        pending = runner.pending_user_input(chat_id)
+        if pending is None:
+            await query.answer("当前没有待确认问题", show_alert=True)
+            return
+
+        index_text = _callback_payload(query.data, "pending:")
+        if not index_text.isdigit():
+            await query.answer("选项无效", show_alert=True)
+            return
+        option_index = int(index_text)
+        if option_index < 0 or option_index >= len(pending.options):
+            await query.answer("选项已失效", show_alert=True)
+            return
+
+        answer = pending.options[option_index]
+        await query.answer(f"已提交：{answer}")
+        try:
+            submitted_text, submitted_keyboard = _render_pending_prompt(
+                f"已提交：{answer}\n\n{pending.question}",
+                pending,
+                include_options=False,
+            )
+            await query.edit_message_text(
+                _trim_telegram_text(submitted_text),
+                reply_markup=InlineKeyboardMarkup(submitted_keyboard),
+            )
+        except Exception:
+            pass
+        await runner.submit(chat_id, answer)
 
     async def navigation_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
@@ -713,6 +768,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("start", restricted(settings, start_command)))
     application.add_handler(CommandHandler("status", restricted(settings, status_command)))
     application.add_handler(CallbackQueryHandler(model_select_callback, pattern=r"^model_sel:"))
+    application.add_handler(CallbackQueryHandler(pending_callback, pattern=r"^pending:"))
     application.add_handler(CallbackQueryHandler(navigation_callback, pattern=r"^nav:"))
     application.add_handler(CallbackQueryHandler(session_callback, pattern=r"^(smenu:|sopen:|suse:|shis:|sdel:|sdelok:)"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, restricted(settings, text_message)))
@@ -860,6 +916,33 @@ def _render_model_menu(models: list[str], current: str, prefix: str | None = Non
             [InlineKeyboardButton("主菜单", callback_data="nav:main")],
         ]
     )
+    return text, keyboard
+
+
+def _render_pending_prompt(
+    text: str,
+    pending: PendingUserInput,
+    include_options: bool = True,
+) -> tuple[str, list[list[InlineKeyboardButton]]]:
+    """渲染等待用户确认/补充信息的消息与按钮"""
+
+    keyboard: list[list[InlineKeyboardButton]] = []
+    if include_options and pending.options:
+        row: list[InlineKeyboardButton] = []
+        for index, option in enumerate(pending.options):
+            row.append(InlineKeyboardButton(option, callback_data=f"pending:{index}"))
+            if len(row) == 2:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+    keyboard.append(
+        [
+            InlineKeyboardButton("状态与诊断", callback_data="nav:status"),
+            InlineKeyboardButton("当前会话", callback_data="nav:session_current"),
+        ]
+    )
+    keyboard.append([InlineKeyboardButton("主菜单", callback_data="nav:main")])
     return text, keyboard
 
 
