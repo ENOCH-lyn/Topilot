@@ -108,7 +108,7 @@ topilot start
 - `/status`：查看后端状态、当前会话、来源、状态、模型和工作区摘要，并可通过按钮打开后端诊断报告
 - 直接发送文本将进入对话
 
-Bot 启动时会自动向 Telegram 注册命令菜单；`/start`、`/help`、`/status`、`/model`、`/sessions`、`/session_current` 等入口也提供内联按钮，常用操作可直接点击完成。
+Bot 启动时会自动向 Telegram 注册命令菜单；`/start`、`/status`、`/model`、`/sessions`、`/session_current` 等入口也提供内联按钮，常用操作可直接点击完成。
 
 ## License
 

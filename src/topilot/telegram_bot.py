@@ -24,7 +24,6 @@ def _bot_commands() -> list[BotCommand]:
 
     return [
         BotCommand("start", "打开主菜单"),
-        BotCommand("help", "查看帮助"),
         BotCommand("status", "查看状态与诊断"),
         BotCommand("model", "查看和切换模型"),
         BotCommand("sessions", "管理会话"),
@@ -437,10 +436,6 @@ def build_application(settings: Settings) -> Application:
         text, keyboard = _render_main_menu()
         await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-    async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        text, keyboard = _render_main_menu()
-        await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-
     async def whoami_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat or not update.effective_user:
             return
@@ -545,7 +540,7 @@ def build_application(settings: Settings) -> Application:
         action = _callback_payload(query.data, "nav:")
         await query.answer()
 
-        if action in {"main", "help"}:
+        if action == "main":
             text, keyboard = _render_main_menu()
         elif action == "status":
             text, keyboard = _render_status_panel(runner.status_text(chat_id))
@@ -716,7 +711,6 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("session_use", restricted(settings, session_use_command)))
     application.add_handler(CommandHandler("model", restricted(settings, model_command)))
     application.add_handler(CommandHandler("start", restricted(settings, start_command)))
-    application.add_handler(CommandHandler("help", restricted(settings, help_command)))
     application.add_handler(CommandHandler("status", restricted(settings, status_command)))
     application.add_handler(CallbackQueryHandler(model_select_callback, pattern=r"^model_sel:"))
     application.add_handler(CallbackQueryHandler(navigation_callback, pattern=r"^nav:"))

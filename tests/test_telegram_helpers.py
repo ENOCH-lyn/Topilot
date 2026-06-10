@@ -273,7 +273,6 @@ def test_build_application_registers_required_commands_callbacks_and_text_handle
         "session_use",
         "model",
         "start",
-        "help",
         "status",
     }
 
@@ -305,7 +304,6 @@ def test_bot_commands_registered_for_telegram_menu_match_public_commands() -> No
 
     assert commands == [
         "start",
-        "help",
         "status",
         "model",
         "sessions",

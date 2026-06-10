@@ -44,13 +44,13 @@
 3. 自建 HTTP 网关：灵活但完全超出当前项目边界。
 
 ## 6. 可自动化验收标准
-1. `build_application()` 构建出的 Application 必须注册以下公开命令：`whoami`、`session_current`、`sessions`、`session_new`、`session_use`、`model`、`start`、`help`、`status`。
+1. `build_application()` 构建出的 Application 必须注册以下公开命令：`whoami`、`session_current`、`sessions`、`session_new`、`session_use`、`model`、`start`、`status`。
 2. 当 `telegram.allowed_chat_ids` 非空且请求 chat_id 不在列表中时，除 `/whoami` 外的业务命令和普通文本消息必须返回“当前用户未授权”提示，不得调用 `TaskRunner.submit()`。
 3. 当 `telegram.allowed_chat_ids` 为空时，系统必须允许所有 chat_id 正常进入业务流程。
 4. 当配置存在 `telegram.proxy_url` 时，ApplicationBuilder 必须同时设置消息发送代理和 getUpdates 代理。
 5. 对普通文本消息，系统必须把文本内容原样传入 `TaskRunner.submit(chat_id, text)`。
 6. Bot 启动后必须调用 Telegram `set_my_commands()` 注册命令菜单，命令列表应与公开命令一致。
-7. `/start` 与 `/help` 必须返回主菜单按钮；`/status` 必须提供后端诊断、模型切换、会话管理、当前会话和主菜单按钮。
+7. `/start` 必须返回主菜单按钮；`/status` 必须提供后端诊断、模型切换、会话管理、当前会话和主菜单按钮。
 8. `/model` 返回的模型按钮必须去除空值和重复值，当前模型按钮必须带 `✓` 标识，并提供状态、会话和主菜单按钮。
 9. 会话菜单分页必须能处理负数、过大页码和非法页码，最终展示页码必须落在合法范围内。
 10. 会话详情页必须包含接管、查看历史、刷新详情、删除、返回列表、主菜单按钮；历史页必须包含刷新历史、返回详情、返回列表、主菜单按钮；删除页必须包含确认删除、取消、返回列表、主菜单按钮。

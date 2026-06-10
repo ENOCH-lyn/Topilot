@@ -84,12 +84,12 @@ Topilot 当前需求拆分为五个核心模块：
 
 #### 7.2.2 结构化需求
 1. 系统应支持接收文本消息并把非命令文本视为 Copilot 对话输入。
-2. 系统应支持以下命令：`/start`、`/help`、`/whoami`、`/session_current`、`/sessions`、`/session_new`、`/session_use`、`/model`、`/status`。
+2. 系统应支持以下命令：`/start`、`/whoami`、`/session_current`、`/sessions`、`/session_new`、`/session_use`、`/model`、`/status`。
 3. 系统应基于 `telegram.allowed_chat_ids` 执行授权校验；当白名单为空时，默认允许所有 Chat 访问。
 4. 对未授权的 Chat，系统应拒绝调用，并返回如何获取 `chat_id` 的提示信息。
 5. `/whoami` 必须保持可用，用于协助获取授权所需的 `chat_id`。
 6. `/status` 应展示后端状态，以及当前会话、来源、状态、模型和工作区摘要，并提供后端诊断按钮以查看命令、解析路径、工作区、模型、调用参数、候选模型和待处理问题。
-7. 系统启动时应向 Telegram 注册公开命令菜单；`/start`、`/help`、`/status`、`/model`、`/sessions` 和 `/session_current` 等入口应提供内联按钮，降低移动端输入成本。
+7. 系统启动时应向 Telegram 注册公开命令菜单；`/start`、`/status`、`/model`、`/sessions` 和 `/session_current` 等入口应提供内联按钮，降低移动端输入成本。
 
 ### 7.3 Copilot 对话与流式展示模块
 

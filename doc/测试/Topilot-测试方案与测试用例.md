@@ -100,11 +100,11 @@ pytest
 | TG-04 | 模型命令菜单 | 模型列表不为空 | 发送 `/model` | 返回带按钮的模型菜单 |
 | TG-05 | 会话命令菜单 | 存在会话数据 | 发送 `/sessions` | 返回分页会话菜单 |
 | TG-06 | 空白名单放行 | `allowed_chat_ids` 为空 | 发送普通文本 | 放行业务处理器 |
-| TG-07 | Handler 注册完整性 | 构建 Application | 读取 handler 注册表 | 注册 PRD 要求的 9 个公开命令、3 个回调 pattern 和文本消息入口 |
+| TG-07 | Handler 注册完整性 | 构建 Application | 读取 handler 注册表 | 注册 PRD 要求的 8 个公开命令、3 个回调 pattern 和文本消息入口 |
 | TG-08 | `/status` 后端诊断按钮 | Copilot 命令可执行且存在模型缓存 | 打开 `/status` 并点击“后端诊断” | 返回后端状态、命令、解析路径、工作区、模型、调用参数、候选模型和待处理问题 |
 | TG-09 | 回调 payload 解析 | 含合法、非法、空白、负数页码的 callback_data | 调用解析函数 | 正确提取 payload，非法页码回退到第 0 页 |
 | TG-10 | 模型菜单去重 | 模型列表含空值和重复值 | 渲染 `/model` 菜单 | 按两列生成按钮，重复模型不重复展示，当前模型带 `✓`，并提供状态、会话和主菜单按钮 |
-| TG-11 | Telegram 命令菜单注册 | 构建 Bot 启动流程 | 读取 `_bot_commands()` | 注册 `start`、`help`、`status`、`model`、`sessions`、`session_current`、`session_new`、`session_use`、`whoami`，不注册 `llm` |
+| TG-11 | Telegram 命令菜单注册 | 构建 Bot 启动流程 | 读取 `_bot_commands()` | 注册 `start`、`status`、`model`、`sessions`、`session_current`、`session_new`、`session_use`、`whoami`，不注册 `llm` |
 | TG-12 | 主菜单与导航按钮 | 渲染主菜单、状态面板和后端诊断面板 | 调用纯渲染函数 | 按钮 callback_data 使用 `nav:` 前缀并能回到主菜单 |
 
 ### 6.3 Copilot 对话与流式展示模块

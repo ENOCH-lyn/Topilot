@@ -135,7 +135,6 @@
 | 命令 | 入参 | 输出 | 权限 | 失败反馈 |
 | --- | --- | --- | --- | --- |
 | `/start` | 无 | 主菜单按钮面板 | 受白名单控制 | 未授权提示 |
-| `/help` | 无 | 主菜单按钮面板 | 受白名单控制 | 未授权提示 |
 | `/whoami` | 无 | chat_id / user_id / username | 开放 | 无 |
 | `/session_current` | 无 | 当前会话 ID 及简要摘要 | 受白名单控制 | 未授权提示 |
 | `/sessions` | 无 | 会话菜单 | 受白名单控制 | 未授权提示 |
@@ -309,7 +308,7 @@
 5. 若本机会话唯一匹配，则执行接管；若多个匹配，则返回歧义提示，要求输入更长前缀。
 
 ### 5.7 Telegram 回调渲染算法
-1. `/start` 与 `/help` 使用 `_render_main_menu()` 渲染主菜单按钮，提供状态与诊断、模型切换、会话管理、当前会话、新建会话和我的 ID 入口。
+1. `/start` 使用 `_render_main_menu()` 渲染主菜单按钮，提供状态与诊断、模型切换、会话管理、当前会话、新建会话和我的 ID 入口。
 2. `/status` 使用 `_render_status_panel()` 渲染状态摘要，并提供“后端诊断”“模型切换”“会话管理”“当前会话”“主菜单”等按钮。
 3. `nav:diagnostic` 使用 `_render_diagnostic_panel()` 展示完整 Copilot 后端诊断报告；`nav:model`、`nav:sessions`、`nav:session_current`、`nav:session_new` 等导航回调分别复用对应菜单渲染函数。
 4. `/model` 命令先读取运行期模型缓存，再用 `_normalize_model_list()` 去除空值和重复值。
