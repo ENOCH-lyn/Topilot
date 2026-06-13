@@ -2,8 +2,6 @@
 <img width="100" src="./assets/logo.png">
 <h1 align="center">Topilot</h1></div>
 
-简体中文 | [English](./README-en.md)
-
 通过 Telegram Bot 使用 GitHub Copilot CLI
 
 ## 运行截图
