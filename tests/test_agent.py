@@ -116,6 +116,44 @@ def test_stream_events_map_tool_logs_and_reply_deltas(make_settings) -> None:
     assert reply_events[0].text == "测试回复"
 
 
+def test_stream_events_skip_tool_planning_assistant_messages(make_settings) -> None:
+    planner = AssistantPlanner(make_settings())
+    state = StreamState()
+
+    planning_events = planner._stream_events_from_item(
+        {
+            "type": "assistant.message",
+            "data": {
+                "content": "Running quick checks before tool execution.",
+                "toolRequests": [
+                    {
+                        "toolCallId": "call-1",
+                        "name": "report_intent",
+                        "arguments": {"intent": "Exploring environment"},
+                    }
+                ],
+            },
+        },
+        state,
+    )
+    final_events = planner._stream_events_from_item(
+        {
+            "type": "assistant.message",
+            "data": {
+                "content": "最终结果",
+                "toolRequests": [],
+                "phase": "final_answer",
+            },
+        },
+        state,
+    )
+
+    assert planning_events == []
+    assert len(final_events) == 1
+    assert final_events[0].kind == "reply"
+    assert final_events[0].text == "最终结果"
+
+
 def test_fetch_available_models_falls_back_to_configured_models(make_settings, monkeypatch) -> None:
     planner = AssistantPlanner(make_settings(copilot_available_models=["gpt-5", "gpt-5-mini"]))
 
@@ -533,6 +571,8 @@ def test_json_text_and_runtime_helpers_cover_nested_and_fallback_inputs(make_set
     assert planner._compact_json({"a": 1, "b": "x"}) == '{"a":1,"b":"x"}'
     assert planner._compact_json(None) == ""
     assert planner._extract_delta_text({"content": {"chunk": "delta"}}) == "delta"
+    assert planner._extract_delta_text({"deltaContent": " hello "}) == " hello "
+    assert planner._extract_delta_text({"content": {"chunk": " "}}) == " "
     assert planner._extract_tool_arguments('{"path":"src"}') == {"path": "src"}
     assert planner._extract_tool_arguments("{broken") == {}
     assert planner._build_context_suffix({"path": "src", "glob": "*.py"}, [("path", "path"), ("glob", "glob")]) == "（path=src, glob=*.py）"

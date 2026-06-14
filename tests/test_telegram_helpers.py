@@ -104,6 +104,39 @@ def test_chunk_and_trim_helpers_keep_telegram_safe_lengths() -> None:
     assert trimmed.endswith("...")
 
 
+def test_reply_buffer_preserves_spacing_and_newlines() -> None:
+    buffer = ""
+
+    def append(current: str, chunk: str) -> str:
+        if not current:
+            return chunk
+        if chunk.startswith(current):
+            return chunk
+        if current.endswith(chunk):
+            return current
+        max_len = min(len(current), len(chunk))
+        overlap = 0
+        for size in range(max_len, 0, -1):
+            if current.endswith(chunk[:size]):
+                overlap = size
+                break
+        if overlap >= 6:
+            return current + chunk[overlap:]
+        if "\n" not in chunk and (len(chunk) <= 8 or all(char in set("，。！？；：、,.!?;:()[]{}<>+-=*/\\\"'`") for char in chunk)):
+            return current + chunk
+        if current and not current.endswith("\n"):
+            return current + "\n" + chunk
+        return current + chunk
+
+    buffer = append(buffer, "复测完成摘要：\n\n- 列出目录：发现 ")
+    buffer = append(buffer, "copilot_test.txt 与 新建 copilot_test2.txt。")
+    buffer = append(buffer, "\n- 创建：C:\\Users\\ENOCH\\.topilot\\workspace\\copilot_test2.txt 已创建。")
+
+    assert "copilot_test.txt 与 新建 copilot_test2.txt。" in buffer
+    assert "发现 \n" in buffer
+    assert "\n- 创建：" in buffer
+
+
 def test_render_session_menu_shows_active_and_running_marks() -> None:
     text, keyboard = _render_session_menu(
         [
@@ -257,6 +290,7 @@ def test_build_application_registers_required_commands_callbacks_and_text_handle
 
     app = build_application(make_settings())
     handlers = app.handlers[0]
+    trace_handlers = app.handlers[-1]
 
     command_handlers = [handler for handler in handlers if isinstance(handler, CommandHandler)]
     commands = {
@@ -287,8 +321,12 @@ def test_build_application_registers_required_commands_callbacks_and_text_handle
         r"^(smenu:|sopen:|suse:|shis:|sdel:|sdelok:)",
     ]
 
+    trace_message_handlers = [handler for handler in trace_handlers if isinstance(handler, MessageHandler)]
     message_handlers = [handler for handler in handlers if isinstance(handler, MessageHandler)]
+    assert len(trace_message_handlers) == 1
+    assert trace_message_handlers[0].callback.__qualname__.endswith("trace_incoming_message")
     assert len(message_handlers) == 1
+    assert message_handlers[0].callback.__qualname__.endswith("restricted.<locals>.wrapped")
 
     callbacks_by_command = {
         next(iter(handler.commands)): handler.callback.__qualname__
@@ -313,3 +351,18 @@ def test_bot_commands_registered_for_telegram_menu_match_public_commands() -> No
         "whoami",
     ]
     assert "llm" not in commands
+
+
+def test_build_application_sets_get_updates_timeouts(make_settings) -> None:
+    from topilot.telegram_bot import build_application
+
+    app = build_application(make_settings())
+
+    get_updates_request = app.bot._request[0]
+    request = app.bot._request[1]
+
+    assert request.read_timeout == 5.0
+    assert get_updates_request.read_timeout == 45.0
+    assert get_updates_request._client.timeout.connect == 10.0
+    assert get_updates_request._client.timeout.write == 10.0
+    assert get_updates_request._client.timeout.pool == 10.0

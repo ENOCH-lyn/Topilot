@@ -131,7 +131,13 @@ def run_start() -> int:
         os.environ.setdefault("ALL_PROXY", settings.telegram_proxy_url)
 
     application = build_application(settings)
-    application.run_polling()
+    application.run_polling(
+        poll_interval=0.0,
+        timeout=30,
+        bootstrap_retries=-1,
+        drop_pending_updates=False,
+        close_loop=True,
+    )
     return 0
 
 

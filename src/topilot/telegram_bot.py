@@ -59,6 +59,42 @@ def restricted(settings: Settings, handler: Handler) -> Handler:
     return wrapped
 
 
+def _preview_update_text(text: str | None, limit: int = 120) -> str:
+    """压缩日志中的更新文本，便于定位普通文本消息是否进站"""
+
+    if text is None:
+        return "<none>"
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
+    if not normalized:
+        return "<empty>"
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[:limit] + "..."
+
+
+def _update_log_context(update: object | None) -> tuple[str, str, str, str]:
+    """提取更新日志上下文，避免日志里只有一句“没反应”"""
+
+    if not isinstance(update, Update):
+        return ("<none>", "<none>", "<none>", "<none>")
+
+    update_id = str(update.update_id)
+    chat_id = str(update.effective_chat.id) if update.effective_chat else "<none>"
+    message_id = str(update.effective_message.message_id) if update.effective_message else "<none>"
+
+    if update.callback_query and update.callback_query.data:
+        text = f"[callback] {update.callback_query.data}"
+    elif update.effective_message:
+        text = (
+            update.effective_message.text
+            or update.effective_message.caption
+            or "<non-text>"
+        )
+    else:
+        text = "<none>"
+    return (update_id, chat_id, message_id, _preview_update_text(text))
+
+
 def build_application(settings: Settings) -> Application:
     """构建并返回 Telegram Application 实例"""
 
@@ -109,8 +145,8 @@ def build_application(settings: Settings) -> Application:
         async def reply(self, text: str) -> None:
             """接收并渲染流式回复内容"""
 
-            normalized = text.strip()
-            if not normalized or self._closed:
+            normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+            if normalized == "" or self._closed:
                 return
             self._reply_started = True
             self._append_reply_chunk(normalized)
@@ -126,7 +162,7 @@ def build_application(settings: Settings) -> Application:
                 return
             self._closed = True
             if final_text and final_text.strip():
-                final_clean = final_text.strip()
+                final_clean = final_text.replace("\r\n", "\n").replace("\r", "\n").strip()
                 if final_clean != self._reply_text():
                     self._reply_buffer = final_clean
             if failed:
@@ -223,7 +259,7 @@ def build_application(settings: Settings) -> Application:
             return self._trim_tail(reply_text, 3200)
 
         def _reply_text(self) -> str:
-            return self._reply_buffer.strip()
+            return self._reply_buffer.rstrip()
 
         def _append_reply_chunk(self, chunk: str) -> None:
             if not self._reply_buffer:
@@ -432,6 +468,41 @@ def build_application(settings: Settings) -> Application:
             logger.warning("Telegram Bot 命令菜单注册失败: %s", exc)
         logger.info("Telegram application 启动完成")
 
+    async def trace_incoming_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not isinstance(update, Update):
+            return
+        if not update.effective_message or not update.effective_chat:
+            return
+        update_id, chat_id, message_id, text_preview = _update_log_context(update)
+        logger.info(
+            "收到 Telegram 更新 update_id=%s chat_id=%s message_id=%s text=%s",
+            update_id,
+            chat_id,
+            message_id,
+            text_preview,
+        )
+
+    async def application_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        error = context.error
+        update_id, chat_id, message_id, text_preview = _update_log_context(update)
+        if error is None:
+            logger.error(
+                "Telegram 更新处理失败 update_id=%s chat_id=%s message_id=%s payload=%s",
+                update_id,
+                chat_id,
+                message_id,
+                text_preview,
+            )
+            return
+        logger.error(
+            "Telegram 更新处理失败 update_id=%s chat_id=%s message_id=%s payload=%s",
+            update_id,
+            chat_id,
+            message_id,
+            text_preview,
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
     async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text, keyboard = _render_main_menu()
         await update.effective_message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -487,7 +558,14 @@ def build_application(settings: Settings) -> Application:
     async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_message or not update.effective_chat or not update.effective_message.text:
             return
-        logger.info("收到文本消息 chat_id=%s", update.effective_chat.id)
+        update_id, chat_id, message_id, text_preview = _update_log_context(update)
+        logger.info(
+            "收到文本消息 update_id=%s chat_id=%s message_id=%s text=%s",
+            update_id,
+            chat_id,
+            message_id,
+            text_preview,
+        )
         await runner.submit(update.effective_chat.id, update.effective_message.text)
 
     async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -698,12 +776,21 @@ def build_application(settings: Settings) -> Application:
         except asyncio.CancelledError:
             pass
 
-    builder = ApplicationBuilder().token(settings.telegram_bot_token)
+    builder = (
+        ApplicationBuilder()
+        .token(settings.telegram_bot_token)
+        .get_updates_connect_timeout(10.0)
+        .get_updates_read_timeout(45.0)
+        .get_updates_write_timeout(10.0)
+        .get_updates_pool_timeout(10.0)
+    )
     if settings.telegram_proxy_url:
         builder = builder.proxy(settings.telegram_proxy_url).get_updates_proxy(settings.telegram_proxy_url)
 
     application = builder.post_init(on_startup).build()
 
+    application.add_handler(MessageHandler(filters.ALL, trace_incoming_message), group=-1)
+    application.add_error_handler(application_error_handler)
     application.add_handler(CommandHandler("whoami", whoami_command))
     application.add_handler(CommandHandler("session_current", restricted(settings, session_current_command)))
     application.add_handler(CommandHandler("sessions", restricted(settings, sessions_command)))

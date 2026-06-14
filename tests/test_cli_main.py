@@ -47,8 +47,8 @@ def test_run_start_sets_proxy_and_runs_application(make_settings, monkeypatch: p
     calls: dict[str, object] = {}
 
     class FakeApplication:
-        def run_polling(self) -> None:
-            calls["run_polling"] = True
+        def run_polling(self, **kwargs) -> None:
+            calls["run_polling_kwargs"] = kwargs
 
     monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
     monkeypatch.setattr(cli_main, "configure_logging", lambda current: calls.setdefault("settings", current))
@@ -59,7 +59,13 @@ def test_run_start_sets_proxy_and_runs_application(make_settings, monkeypatch: p
 
     assert cli_main.run_start() == 0
     assert calls["settings"] is settings
-    assert calls["run_polling"] is True
+    assert calls["run_polling_kwargs"] == {
+        "poll_interval": 0.0,
+        "timeout": 30,
+        "bootstrap_retries": -1,
+        "drop_pending_updates": False,
+        "close_loop": True,
+    }
     assert os.environ["HTTP_PROXY"] == settings.telegram_proxy_url
     assert os.environ["HTTPS_PROXY"] == settings.telegram_proxy_url
     assert os.environ["ALL_PROXY"] == settings.telegram_proxy_url

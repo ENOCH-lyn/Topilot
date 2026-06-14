@@ -522,6 +522,8 @@ class AssistantPlanner:
             return []
 
         if item_type == "assistant.message":
+            if self._is_tool_planning_message(data):
+                return []
             if stream_state.has_reply_delta_in_turn:
                 return []
             return [StreamEvent(kind="reply", text=text, event_type=item_type)] if text else []
@@ -885,6 +887,16 @@ class AssistantPlanner:
         keys = {"toolName", "tool", "toolCallId", "success", "result", "toolTelemetry", "arguments", "error"}
         return any(key in data for key in keys)
 
+    def _is_tool_planning_message(self, data: object) -> bool:
+        """识别 Copilot 在真正调用工具前输出的规划前奏消息"""
+
+        if not isinstance(data, dict):
+            return False
+        if str(data.get("phase") or "").strip().lower() == "final_answer":
+            return False
+        tool_requests = data.get("toolRequests")
+        return isinstance(tool_requests, list) and len(tool_requests) > 0
+
     def _extract_tool_result_text(self, data: object) -> str:
         if not isinstance(data, dict):
             return ""
@@ -951,15 +963,15 @@ class AssistantPlanner:
         delta_keys = ("deltaContent", "delta", "textDelta", "chunk")
         for key in delta_keys:
             value = data.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
+            if isinstance(value, str) and value != "":
+                return value
 
         content = data.get("content")
         if isinstance(content, dict):
             for key in delta_keys:
                 value = content.get(key)
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
+                if isinstance(value, str) and value != "":
+                    return value
         return ""
 
     def _build_copilot_argv(
