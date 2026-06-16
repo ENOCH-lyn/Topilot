@@ -13,12 +13,12 @@
 #### 2.1.2 职责
 1. 提供 `init`、`start`、`doctor` 子命令。
 2. 在首次运行时自动触发初始化。
-3. 统一调度配置加载、日志初始化与 Telegram Application 启动。
+3. 统一调度配置加载、日志初始化，以及 Telegram / Feishu 运行器启动。
 
 #### 2.1.3 设计要点
 1. CLI 入口不直接处理业务逻辑，只做环境准备和流程分发。
 2. 配置文件固定存放在 `~/.topilot/config.json`，避免出现多套配置目录。
-3. `doctor` 不启动 Telegram，也不调用真实 Copilot 对话，只执行配置、目录、命令可执行性和问题清单诊断，用于启动前检查。
+3. `doctor` 不启动 Telegram 或 Feishu，也不调用真实 Copilot 对话，只执行配置、目录、命令可执行性和问题清单诊断，用于启动前检查。
 
 ### 2.2 配置与路径模块
 
@@ -35,17 +35,19 @@
 1. 使用 `Settings` 数据类集中承载运行配置，减少下游模块耦合。
 2. 使用解析函数统一转换布尔值、整数、浮点数和模型列表，避免散落在业务层。
 3. `telegram.allowed_chat_ids` 支持数组或逗号分隔字符串，非法项会被忽略，避免单个错误值导致整个配置加载失败。
+4. `feishu.allowed_chat_ids` 与 `feishu.allowed_open_ids` 支持数组或逗号分隔字符串，用于按会话或用户维度控制访问。
 
-### 2.3 Telegram 接入模块
+### 2.3 平台接入模块
 
 #### 2.3.1 代码位置
-`src/topilot/telegram_bot.py`
+`src/topilot/telegram_bot.py`、`src/topilot/feishu_bot.py`
 
 #### 2.3.2 职责
-1. 构建 Telegram Application。
-2. 注册命令、文本消息和按钮回调。
-3. 提供白名单访问控制。
-4. 实现过程消息、回复消息、会话菜单和模型菜单。
+1. 构建 Telegram Application，并注册命令、文本消息和按钮回调。
+2. 构建 Feishu 长连接事件处理器，并接收文本消息、`post` 富文本消息、菜单事件和卡片动作事件。
+3. 提供 Telegram 与 Feishu 的白名单访问控制。
+4. 为 Telegram 实现过程消息、回复消息、会话菜单和模型菜单。
+5. 为 Feishu 实现文本/富文本消息接收、未授权提示、交互卡片回复、菜单入口和卡片按钮回调。
 
 #### 2.3.3 设计要点
 1. 使用 `restricted()` 装饰器统一做权限校验，降低 handler 重复代码。
@@ -53,6 +55,7 @@
 3. 使用按钮回调数据前缀区分菜单类型，如 `model_sel:`、`smenu:`、`sopen:`、`suse:`、`shis:`、`sdel:`、`sdelok:`。
 4. 模型菜单、会话详情、会话历史、删除确认页均使用独立渲染函数生成文本和按钮，避免回调分支中散落重复 UI 结构。
 5. 回调 payload 和页码统一通过 `_callback_payload()`、`_callback_page()` 解析，非法页码或负数统一回到第 0 页。
+6. Feishu 侧采用 `lark-oapi` 长连接客户端，通过 `im.message.receive_v1`、机器人菜单事件和卡片动作回调接入消息与交互；业务层直接复用 `TaskRunner`、会话存储和模型切换链路。
 
 ### 2.4 任务编排模块
 
@@ -66,9 +69,10 @@
 4. 聚合会话菜单数据和接管逻辑。
 
 #### 2.4.3 设计要点
-1. `TaskRunner` 是系统业务协调中心，但不直接关心 Telegram API 细节。
+1. `TaskRunner` 是系统业务协调中心，但不直接关心 Telegram 或 Feishu API 细节。
 2. 对流式输出通过 `LiveProgress` 协议抽象，避免与具体消息实现耦合。
 3. 当前会话摘要优先读取实时 `session-state` 元数据，避免已保存会话在本机状态变化后仍展示旧模型、旧工作区或旧运行状态。
+4. 会话键统一按字符串持久化，既兼容 Telegram 数字 chat_id，也兼容 Feishu 字符串 chat_id。
 
 ### 2.5 Copilot CLI 调用模块
 
@@ -101,7 +105,7 @@
 
 #### 2.6.3 设计要点
 1. 使用本地目录扫描而不是额外服务接口，直接复用 Copilot 原生状态。
-2. 历史摘要只保留最近若干条，避免 Telegram 消息过长。
+2. 历史摘要只保留最近若干条，避免移动端消息过长。
 3. 会话读取和删除只接受 `session-state` 根目录下的直接子目录名，拒绝绝对路径、`../` 等路径型会话 ID。
 
 ### 2.7 持久化模块
@@ -127,7 +131,7 @@
 | 命令 | 入参 | 输出 | 权限 | 异常 |
 | --- | --- | --- | --- | --- |
 | `topilot init [--force]` | 交互式输入或覆盖标志 | 生成配置文件 | 本地命令行用户 | 配置目录无权限、输入为空 |
-| `topilot start` | 无 | 启动 Bot 长轮询 | 本地命令行用户 | 配置缺失、Token 为空 |
+| `topilot start` | 无 | 启动 Telegram 轮询与/或 Feishu 长连接 | 本地命令行用户 | 配置缺失、接入密钥为空 |
 | `topilot doctor` | 无 | 输出 `app_home`、`config`、`has_config`、配置状态、Token 状态、Copilot 命令解析、命令可执行性、工作区状态、超时配置和问题清单 | 本地命令行用户 | 无 |
 
 ### 3.2 Telegram 命令接口
@@ -142,6 +146,12 @@
 | `/session_use <prefix>` | 会话前缀 | 切换或接管结果 | 受白名单控制 | 会话不存在 / 未授权 |
 | `/model` | 无 | 模型选择键盘 | 受白名单控制 | 无可用模型 / 未授权 |
 | `/status` | 无 | 后端状态、当前会话、来源、状态、模型与工作区摘要，并提供后端诊断按钮 | 受白名单控制 | 未授权提示 |
+
+### 3.3 Feishu 事件接口
+
+| 事件 | 输入 | 输出 | 权限 | 失败反馈 |
+| --- | --- | --- | --- | --- |
+| `im.message.receive_v1` | 文本消息或 `post` 富文本消息事件 | 转入 `TaskRunner.submit()`、命令路由或返回拒绝提示 | 受白名单控制 | 未授权提示 / 无法提取文本时忽略 |
 
 ### 3.3 回调接口
 
@@ -161,15 +171,22 @@
 ### 4.1 `config.json`
 
 #### 4.1.1 设计思路
-采用分组对象结构，分别描述 Telegram、Copilot、运行时、存储和日志配置，便于统一扩展与校验。
+采用分组对象结构，分别描述 Telegram、Feishu、Copilot、运行时、存储和日志配置，便于统一扩展与校验。
 
 #### 4.1.2 字段设计
 
 | 分组 | 字段 | 类型 | 说明 |
 | --- | --- | --- | --- |
+| `telegram` | `enabled` | bool | 是否启用 Telegram 通道 |
 | `telegram` | `bot_token` | string | Telegram Bot Token |
 | `telegram` | `allowed_chat_ids` | array[int]/string | 白名单 Chat ID，支持数组或逗号分隔字符串 |
 | `telegram` | `proxy_url` | string/null | Telegram 代理 |
+| `feishu` | `enabled` | bool | 是否启用 Feishu 通道 |
+| `feishu` | `app_id` | string | Feishu 自建应用 App ID |
+| `feishu` | `app_secret` | string | Feishu 自建应用 App Secret |
+| `feishu` | `allowed_chat_ids` | array[string]/string | Feishu Chat ID 白名单 |
+| `feishu` | `allowed_open_ids` | array[string]/string | Feishu Open ID 白名单 |
+| `feishu` | `reply_in_thread` | bool | Feishu 拒绝提示是否线程回复 |
 | `copilot` | `cli_command` | string | Copilot CLI 命令 |
 | `copilot` | `model` | string | 默认模型 |
 | `copilot` | `available_models` | array[string] | 模型回退列表 |
@@ -200,7 +217,10 @@
 | --- | --- | --- |
 | `has_config` | bool | `~/.topilot/config.json` 是否存在 |
 | `config_status` | string | `missing`、`invalid` 或 `ok` |
+| `telegram_enabled` | bool | 是否启用 Telegram |
 | `telegram_token_status` | string | `unknown`、`invalid`、`empty` 或 `set` |
+| `feishu_enabled` | bool | 是否启用 Feishu |
+| `feishu_app_status` | string | `unknown`、`invalid`、`disabled`、`empty` 或 `set` |
 | `copilot_cli_command` | string/null | 配置中的 Copilot CLI 命令 |
 | `copilot_cli_resolved_command` | string/null | 解析后的可执行路径或原始命令 |
 | `copilot_cli_runnable` | bool/null | 当前系统是否能找到或访问该命令 |
@@ -213,7 +233,7 @@
 ### 4.3 `chats.json`
 
 #### 4.3.1 设计思路
-按 `chat_id` 为 key 存储最近对话轮次，避免引入数据库。
+按字符串化 `chat_id` 为 key 存储最近对话轮次，避免引入数据库，并兼容 Telegram 与 Feishu。
 
 #### 4.3.2 结构
 
@@ -232,7 +252,7 @@
 ### 4.4 `sessions.json`
 
 #### 4.4.1 设计思路
-把“当前会话”“会话列表”“当前模型”三类状态放在一个 JSON 文件中，便于按 Chat 维度统一管理。
+把“当前会话”“会话列表”“当前模型”三类状态放在一个 JSON 文件中，便于按平台 Chat 维度统一管理。
 
 #### 4.4.2 结构
 
@@ -318,6 +338,14 @@
 6. `/sessions` 与 `smenu:` 回调共用 `_render_session_menu()`，页码先通过 `_callback_page()` 清洗，再按 `page_size` 切片；小于 0、非数字或超过最大页时自动夹到合法范围。
 7. `sopen:` 回调用 `_render_session_detail()` 生成“接管会话、查看历史、刷新详情、删除会话、返回列表、主菜单”按钮。
 8. `shis:` 回调用 `_render_session_history()` 生成“刷新历史、返回详情、返回列表、主菜单”按钮。
+
+### 5.8 Feishu 消息处理算法
+1. Feishu 长连接客户端监听 `im.message.receive_v1`。
+2. 处理 `message_type=text` 与 `message_type=post` 的事件；无法提取有效文本时忽略。
+3. 从事件中提取 `chat_id`、`message_id`、`sender.sender_id.open_id` 和消息文本；`post` 富文本会按段落与标题归一化为普通文本。
+4. 按 `feishu.allowed_chat_ids`、`feishu.allowed_open_ids` 执行授权校验；未授权时回复固定文本提示。
+5. 将会话键转换为 `feishu:<chat_id>` 后交给 `TaskRunner.submit()`，与 Telegram 共用会话存储和 Copilot 调用链。
+6. 普通结果通过交互卡片发送，长耗时请求优先创建同一条进度卡片并持续刷新，最终在原消息位展示结果与快捷按钮。
 9. `sdel:` 回调用 `_render_session_delete_confirm()` 生成“确认删除、取消、返回列表、主菜单”按钮，确保删除操作必须二次确认。
 10. `model_sel:`、`nav:`、`sopen:`、`suse:`、`shis:`、`sdel:`、`sdelok:` 的 payload 均通过 `_callback_payload()` 提取并去除首尾空白。
 

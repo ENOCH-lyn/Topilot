@@ -52,6 +52,7 @@ def test_run_start_sets_proxy_and_runs_application(make_settings, monkeypatch: p
 
     monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
     monkeypatch.setattr(cli_main, "configure_logging", lambda current: calls.setdefault("settings", current))
+    monkeypatch.setattr(cli_main, "start_feishu_bot", lambda current: calls.setdefault("feishu", current))
     monkeypatch.setattr(cli_main, "build_application", lambda current: FakeApplication())
     monkeypatch.delenv("HTTP_PROXY", raising=False)
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
@@ -59,6 +60,7 @@ def test_run_start_sets_proxy_and_runs_application(make_settings, monkeypatch: p
 
     assert cli_main.run_start() == 0
     assert calls["settings"] is settings
+    assert "feishu" not in calls
     assert calls["run_polling_kwargs"] == {
         "poll_interval": 0.0,
         "timeout": 30,
@@ -69,6 +71,49 @@ def test_run_start_sets_proxy_and_runs_application(make_settings, monkeypatch: p
     assert os.environ["HTTP_PROXY"] == settings.telegram_proxy_url
     assert os.environ["HTTPS_PROXY"] == settings.telegram_proxy_url
     assert os.environ["ALL_PROXY"] == settings.telegram_proxy_url
+
+
+def test_run_start_launches_feishu_before_telegram_when_both_enabled(make_settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    calls: list[str] = []
+
+    class FakeApplication:
+        def run_polling(self, **kwargs) -> None:
+            calls.append("telegram")
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "configure_logging", lambda current: calls.append("logging"))
+    monkeypatch.setattr(cli_main, "start_feishu_bot", lambda current: calls.append("feishu"))
+    monkeypatch.setattr(cli_main, "build_application", lambda current: FakeApplication())
+
+    assert cli_main.run_start() == 0
+    assert calls == ["logging", "feishu", "telegram"]
+
+
+def test_run_start_supports_feishu_only_mode(make_settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = make_settings(
+        telegram_enabled=False,
+        telegram_bot_token=None,
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "configure_logging", lambda current: calls.append("logging"))
+    monkeypatch.setattr(cli_main, "start_feishu_bot", lambda current: calls.append("feishu") or object())
+    monkeypatch.setattr(cli_main.time, "sleep", lambda seconds: (_ for _ in ()).throw(SystemExit(0)))
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli_main.run_start()
+
+    assert excinfo.value.code == 0
+    assert calls == ["logging", "feishu"]
 
 
 def test_run_start_returns_error_when_configuration_is_invalid(

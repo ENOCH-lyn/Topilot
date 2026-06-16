@@ -1,11 +1,11 @@
 # Topilot 测试方案与测试用例
 
 ## 1. 文档说明
-本文档用于说明 Topilot 当前版本的测试范围、测试环境、测试方法、测试用例和结果记录口径。仓库中已提交基础 `pytest` 自动化测试，覆盖配置解析、交互式初始化、启动诊断、会话存储容错、本机会话扫描边界、Copilot 事件解析、Copilot CLI 异常提示、Telegram 白名单、命令注册、模型菜单和会话回调渲染逻辑。与此同时，项目负责人已完成真实 Telegram 外网联调与真实 Copilot CLI 集成联调。
+本文档用于说明 Topilot 当前版本的测试范围、测试环境、测试方法、测试用例和结果记录口径。仓库中已提交基础 `pytest` 自动化测试，覆盖配置解析、交互式初始化、启动诊断、会话存储容错、本机会话扫描边界、Copilot 事件解析、Copilot CLI 异常提示、Telegram 白名单、Feishu 事件接入、命令注册、模型菜单和会话回调渲染逻辑。与此同时，项目负责人已完成真实 Telegram 外网联调、真实 Feishu 外网联调与真实 Copilot CLI 集成联调。
 
 ## 2. 测试目标
 1. 验证配置、启动、诊断链路是否可用。
-2. 验证 Telegram 入口、白名单控制和命令路由是否正确。
+2. 验证 Telegram / Feishu 入口、白名单控制和命令路由是否正确。
 3. 验证 Copilot CLI 调用、流式解析和异常处理是否符合设计。
 4. 验证会话管理、接管、删除和自动追踪是否符合预期。
 5. 验证模型发现、回退和切换是否可用。
@@ -22,11 +22,13 @@
 7. `src/topilot/conversation_store.py`
 8. `src/topilot/copilot_sessions.py`
 9. `src/topilot/telegram_bot.py`
+10. `src/topilot/feishu_bot.py`
 
 ### 3.2 已完成手工联调
 1. 真实 Telegram 外网消息收发与命令交互
-2. 真实 Copilot CLI 登录、对话与流式回复链路
-3. 真实运行环境下的状态查询、模型切换与会话管理流程
+2. 真实 Feishu 外网消息收发与长连接事件链路
+3. 真实 Copilot CLI 登录、对话与流式回复链路
+4. 真实运行环境下的状态查询、模型切换与会话管理流程
 
 ### 3.3 当前未纳入自动化验证
 1. 不同代理工具的兼容性差异
@@ -39,24 +41,26 @@
 | 操作系统 | Windows 10/11 或兼容的 PowerShell 运行环境 |
 | Python | 3.11+ |
 | Bot 框架 | `python-telegram-bot` 22.x |
+| Feishu SDK | `lark-oapi` 1.6.8+ |
 | 运行方式 | 本地命令行 + 可选临时目录 |
 | Copilot CLI | 已安装，集成测试场景下需完成登录 |
 
 ## 5. 测试方法
 1. 单元测试：配置解析、JSON 存储、会话扫描、事件转译等纯逻辑模块。
 2. 集成测试：CLI 子命令、TaskRunner 提交流程、菜单合并逻辑。
-3. 手工联调：在真实 Telegram 与 Copilot CLI 环境下验证端到端流程。
+3. 手工联调：在真实 Telegram、Feishu 与 Copilot CLI 环境下验证端到端流程。
 
 ## 5.1 当前已落仓的 pytest 套件
-截至 2026-06-03，仓库已提交以下测试文件：
-1. `tests/test_config.py`：覆盖交互式 `init --force` 配置生成、已有配置不覆盖、配置写入备份、配置加载、非法 Chat ID 忽略、缺失 Token 异常、`doctor` 诊断输出、Copilot 命令可执行性、无效超时和工作区问题清单。
+截至 2026-06-15，仓库已提交以下测试文件：
+1. `tests/test_config.py`：覆盖交互式 `init --force` 配置生成、已有配置不覆盖、配置写入备份、配置加载、非法 Chat ID 忽略、Telegram / Feishu 配置校验、Feishu-only 模式、缺失接入密钥异常、`doctor` 诊断输出、Copilot 命令可执行性、无效超时和工作区问题清单。
 2. `tests/test_stores.py`：覆盖对话历史裁剪、坏历史记录跳过、会话激活、陈旧 active 值处理、会话前缀唯一性、模型保存、会话删除、状态摘要、当前会话摘要、后端诊断文本、实时本机会话元数据优先级、本机会话前缀接管、会话菜单合并、会话详情/历史/实时载荷和提交流程中的默认会话元数据落地。
 3. `tests/test_copilot_sessions.py`：覆盖 `session-state` 目录解析、历史提取、排序、删除和路径型会话 ID 拒绝。
 4. `tests/test_agent.py`：覆盖 Copilot CLI 参数组装、流式事件转译、模型帮助文本解析、`copilot help config` 模型段解析、`.ps1` 帮助命令包装、模型列表回退、CLI 未就绪诊断、非零退出码、空输出、超时提示，以及工具摘要、命令输出、JSONL 提取和若干辅助分支。
 5. `tests/test_telegram_helpers.py`：覆盖主菜单、状态面板、后端诊断面板、模型按钮布局、模型列表去重、文本分块、会话菜单分页、会话详情/历史/删除确认按钮、回调 payload 解析、白名单放行、未授权拒绝、命令注册表、Telegram 命令菜单注册列表和回调 pattern。
-6. `tests/test_cli_main.py`：覆盖 CLI 入口参数分发、首次运行初始化、`start` 启动、代理环境变量写入和 `__main__` 入口。
-7. `tests/test_logging_setup.py`：覆盖日志级别解析、根日志处理器替换、文件/控制台级别设置和 `httpx` 日志级别设置。
-8. `tests/conftest.py`：提供测试路径和公共测试夹具。
+6. `tests/test_feishu_bot.py`：覆盖 Feishu 文本/富文本内容解析、白名单校验、文本事件提交、流式卡片刷新、命令路由和未授权拒绝路径。
+7. `tests/test_cli_main.py`：覆盖 CLI 入口参数分发、首次运行初始化、Telegram-only / 双通道 / Feishu-only 启动、代理环境变量写入和 `__main__` 入口。
+8. `tests/test_logging_setup.py`：覆盖日志级别解析、根日志处理器替换、文件/控制台级别设置和 `httpx` 日志级别设置。
+9. `tests/conftest.py`：提供测试路径和公共测试夹具。
 
 本地执行命令：
 ```powershell
@@ -65,15 +69,16 @@ pytest
 
 本次实际结果：
 ```text
-76 passed
+43 passed（本轮新增与回归子集）
 ```
 
 ## 5.2 手工联调结果
-截至 2026-06-03，项目负责人已在真实 Telegram 与真实 Copilot CLI 环境下完成手工联调，验证结论如下：
+截至 2026-06-15，项目负责人已在真实 Telegram、真实 Feishu 与真实 Copilot CLI 环境下完成手工联调，验证结论如下：
 1. Bot 启动、命令菜单注册和授权访问控制正常。
-2. 已授权 Chat 可完成文本对话、流式回复查看和状态查询。
-3. 模型切换、会话管理和本机会话接管等核心链路可正常使用。
-4. 外网消息往返与本地 Copilot CLI 调用协同正常，未发现阻断性问题。
+2. 已授权 Telegram Chat 可完成文本对话、流式回复查看和状态查询。
+3. 已授权 Feishu Chat 可完成文本或富文本对话、菜单入口调用、卡片按钮操作与最终结果回传。
+4. 模型切换、会话管理和本机会话接管等核心链路可正常使用。
+5. 外网消息往返与本地 Copilot CLI 调用协同正常，未发现阻断性问题。
 
 ## 6. 测试用例
 
@@ -81,7 +86,7 @@ pytest
 
 | 用例编号 | 用例名称 | 前置条件 | 输入 | 预期结果 |
 | --- | --- | --- | --- | --- |
-| CFG-01 | 默认配置生成 | 空临时目录 | 执行 `topilot init --force` | 生成 `config.json`，包含五大分组 |
+| CFG-01 | 默认配置生成 | 空临时目录 | 执行 `topilot init --force` | 生成 `config.json`，包含 Telegram、Feishu、Copilot、运行时、存储和日志分组 |
 | CFG-02 | 配置覆盖备份 | 已存在旧配置 | 写入新配置 | 生成 `config.backup-*.json` |
 | CFG-03 | 启动前诊断 | 已存在或不存在配置均可 | 执行 `topilot doctor` | 输出 `app_home`、`config`、`has_config`、配置状态、Token 状态、Copilot 命令解析、命令可执行性、工作区状态、超时配置和 `issues` |
 | CFG-04 | 缺少 Token 启动失败 | `telegram.bot_token` 为空 | 执行 `topilot start` | 返回非零状态并提示缺失字段 |
@@ -89,6 +94,8 @@ pytest
 | CFG-06 | 交互式初始化 | 空临时目录并模拟用户输入 | 执行 `topilot init --force` | 写入 `config.json`，Token、Chat ID、模型、工作区、轮询间隔与输入一致 |
 | CFG-07 | 已有配置保护 | `config.json` 已存在 | 执行 `topilot init` | 不覆盖现有配置，提示使用 `topilot init --force` |
 | CFG-08 | 非法 Chat ID 容错 | `allowed_chat_ids` 字符串中混有非数字项 | 加载配置 | 忽略非法项，保留合法整数 Chat ID |
+| CFG-09 | Feishu-only 配置加载 | `telegram.enabled=false`，`feishu.enabled=true` 且填入 App ID / Secret | 加载配置 | 加载成功，允许仅以 Feishu 模式运行 |
+| CFG-10 | 至少启用一个平台 | Telegram 与 Feishu 同时禁用 | 加载配置 | 启动前抛出配置异常 |
 
 ### 6.2 Telegram 接入与访问控制模块
 
@@ -107,7 +114,16 @@ pytest
 | TG-11 | Telegram 命令菜单注册 | 构建 Bot 启动流程 | 读取 `_bot_commands()` | 注册 `start`、`status`、`model`、`sessions`、`session_current`、`session_new`、`session_use`、`whoami`，不注册 `llm` |
 | TG-12 | 主菜单与导航按钮 | 渲染主菜单、状态面板和后端诊断面板 | 调用纯渲染函数 | 按钮 callback_data 使用 `nav:` 前缀并能回到主菜单 |
 
-### 6.3 Copilot 对话与流式展示模块
+### 6.3 Feishu 接入与访问控制模块
+
+| 用例编号 | 用例名称 | 前置条件 | 输入 | 预期结果 |
+| --- | --- | --- | --- | --- |
+| FS-01 | 文本内容解析 | 收到 Feishu 文本或 `post` 富文本消息事件 | 解析 `message.content` | 正确提取可执行文本 |
+| FS-02 | 白名单放行 | `allowed_chat_ids` / `allowed_open_ids` 匹配 | 发送文本事件 | 进入 `TaskRunner.submit()` |
+| FS-03 | 白名单拒绝 | 白名单不匹配 | 发送文本事件 | 返回未授权提示，不进入任务执行 |
+| FS-04 | 非受支持消息忽略 | 收到非 `text` / `post` 消息 | 发送事件 | 不进入任务执行 |
+
+### 6.4 Copilot 对话与流式展示模块
 
 | 用例编号 | 用例名称 | 前置条件 | 输入 | 预期结果 |
 | --- | --- | --- | --- | --- |
@@ -120,7 +136,7 @@ pytest
 | AGT-07 | CLI 超时 | 伪造进程长时间不退出 | 提交请求 | 杀掉子进程并返回包含超时秒数的提示 |
 | AGT-08 | CLI 运行前诊断 | 命令存在、工作区存在、超时有效 | 调用诊断函数 | 返回“Copilot CLI 已就绪”并展示命令、工作区、模型和调用参数 |
 
-### 6.4 会话管理与接管模块
+### 6.5 会话管理与接管模块
 
 | 用例编号 | 用例名称 | 前置条件 | 输入 | 预期结果 |
 | --- | --- | --- | --- | --- |
@@ -136,7 +152,7 @@ pytest
 | SES-10 | 会话回调按钮结构 | 存在会话 ID | 渲染详情、历史、删除确认页 | 按钮分别包含接管、历史、刷新、删除、确认删除、取消、返回列表等 callback_data |
 | SES-11 | 路径型会话 ID 拒绝 | 构造绝对路径或 `../` 形式 session_id | 调用会话读取/删除 | 拒绝访问 session-state 根目录外路径，不删除外部目录 |
 
-### 6.5 模型发现与切换模块
+### 6.6 模型发现与切换模块
 
 | 用例编号 | 用例名称 | 前置条件 | 输入 | 预期结果 |
 | --- | --- | --- | --- | --- |
@@ -152,6 +168,6 @@ pytest
 
 ## 7. 测试结果记录要求
 1. 每次执行测试时，需记录执行日期、执行环境、执行人、用例编号、是否通过、失败原因。
-2. 对手工验证项，应附 Telegram 截图或日志片段作为证据。
+2. 对手工验证项，应附 Telegram / Feishu 截图或日志片段作为证据。
 3. 对自动化测试项，应保存命令输出和失败堆栈。
-4. 2026-06-03 的本地基线结果为 `.\.venv\Scripts\python.exe -m pytest -q` 执行 76 项全部通过，可作为当前版本的测试记录。
+4. 2026-06-15 的本轮回归结果为 `.\.venv\Scripts\python.exe -m pytest tests\test_config.py tests\test_cli_main.py tests\test_feishu_bot.py tests\test_stores.py -q`，43 项全部通过，可作为本轮 Feishu 接入与配置扩展的测试记录。

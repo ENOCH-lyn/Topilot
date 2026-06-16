@@ -1,10 +1,19 @@
 {
   "telegram": {
+    "enabled": true,
     "bot_token": "x",
     "allowed_chat_ids": [
       123456789
     ],
     "proxy_url": null
+  },
+  "feishu": {
+    "enabled": false,
+    "app_id": "cli_xxx",
+    "app_secret": "xxx",
+    "allowed_chat_ids": [],
+    "allowed_open_ids": [],
+    "reply_in_thread": true
   },
   "copilot": {
     "cli_command": "copilot",

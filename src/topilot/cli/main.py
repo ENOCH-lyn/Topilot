@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from pathlib import Path
 
 from topilot.config import (
@@ -12,6 +13,7 @@ from topilot.config import (
     load_settings,
     write_config,
 )
+from topilot.feishu_bot import start_feishu_bot
 from topilot.logging_setup import configure_logging
 from topilot.paths import build_app_paths, ensure_app_dirs
 from topilot.telegram_bot import build_application
@@ -54,6 +56,12 @@ def run_init(force: bool = False) -> int:
     token = _prompt("Telegram Bot Token", required=True)
     chat_ids = _prompt("允许访问的 Chat ID，多个用逗号分隔，留空表示全部允许", default="")
     proxy_url = _prompt("Telegram 代理 URL，可留空", default="")
+    feishu_enabled = _prompt_bool("启用 Feishu 通道", default=False)
+    feishu_app_id = ""
+    feishu_app_secret = ""
+    if feishu_enabled:
+        feishu_app_id = _prompt("Feishu App ID", required=True)
+        feishu_app_secret = _prompt("Feishu App Secret", required=True)
     cli_command = _prompt("Copilot CLI 命令", default="copilot")
     model = _prompt("默认模型", default="gpt-5-mini")
     workspace = _prompt("默认工作区路径", default=paths.workspace_dir.as_posix())
@@ -61,6 +69,7 @@ def run_init(force: bool = False) -> int:
     add_workspace = _prompt_bool("Copilot 命令自动附带 --add-dir", default=True)
 
     payload = default_config_payload(paths)
+    payload["telegram"]["enabled"] = True
     payload["telegram"]["bot_token"] = token
     payload["telegram"]["allowed_chat_ids"] = [
         int(item.strip())
@@ -68,6 +77,9 @@ def run_init(force: bool = False) -> int:
         if item.strip().lstrip("-").isdigit()
     ]
     payload["telegram"]["proxy_url"] = proxy_url or None
+    payload["feishu"]["enabled"] = feishu_enabled
+    payload["feishu"]["app_id"] = feishu_app_id
+    payload["feishu"]["app_secret"] = feishu_app_secret
     payload["copilot"]["cli_command"] = cli_command
     payload["copilot"]["model"] = model
     payload["copilot"]["add_workspace_dir"] = add_workspace
@@ -90,7 +102,10 @@ def run_doctor(app_home: Path | None = None) -> int:
     print(f"config={report.config_path}")
     print(f"has_config={report.has_config}")
     print(f"config_status={report.config_status}")
+    print(f"telegram_enabled={report.telegram_enabled}")
     print(f"telegram_token={report.telegram_token_status}")
+    print(f"feishu_enabled={report.feishu_enabled}")
+    print(f"feishu_app={report.feishu_app_status}")
     print(f"data_dir_exists={report.data_dir_exists}")
     print(f"logs_dir_exists={report.logs_dir_exists}")
     print(f"workspace_dir_exists={report.workspace_dir_exists}")
@@ -130,14 +145,24 @@ def run_start() -> int:
         os.environ.setdefault("HTTPS_PROXY", settings.telegram_proxy_url)
         os.environ.setdefault("ALL_PROXY", settings.telegram_proxy_url)
 
-    application = build_application(settings)
-    application.run_polling(
-        poll_interval=0.0,
-        timeout=30,
-        bootstrap_retries=-1,
-        drop_pending_updates=False,
-        close_loop=True,
-    )
+    feishu_runner = None
+    if settings.feishu_enabled:
+        feishu_runner = start_feishu_bot(settings)
+
+    if settings.telegram_enabled:
+        application = build_application(settings)
+        application.run_polling(
+            poll_interval=0.0,
+            timeout=30,
+            bootstrap_retries=-1,
+            drop_pending_updates=False,
+            close_loop=True,
+        )
+        return 0
+
+    if feishu_runner is not None:
+        while True:
+            time.sleep(3600)
     return 0
 
 

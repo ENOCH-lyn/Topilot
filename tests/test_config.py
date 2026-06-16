@@ -23,6 +23,9 @@ def test_run_init_force_writes_interactive_config(tmp_path: Path, monkeypatch: p
             "telegram-token",
             "1001, 1002",
             "",
+            "y",
+            "cli_test",
+            "secret_test",
             "copilot.cmd",
             "gpt-5",
             workspace.as_posix(),
@@ -40,8 +43,12 @@ def test_run_init_force_writes_interactive_config(tmp_path: Path, monkeypatch: p
 
     assert code == 0
     assert f"配置已写入: {build_app_paths(home).config_file}" in captured.out
+    assert settings.telegram_enabled is True
     assert settings.telegram_bot_token == "telegram-token"
     assert settings.allowed_chat_ids == {1001, 1002}
+    assert settings.feishu_enabled is True
+    assert settings.feishu_app_id == "cli_test"
+    assert settings.feishu_app_secret == "secret_test"
     assert settings.telegram_proxy_url is None
     assert settings.copilot_cli_command == "copilot.cmd"
     assert settings.copilot_cli_model == "gpt-5"
@@ -96,6 +103,12 @@ def test_load_settings_reads_json_config_and_creates_runtime_dirs(tmp_path: Path
     payload = default_config_payload(paths)
     payload["telegram"]["bot_token"] = "telegram-token"
     payload["telegram"]["allowed_chat_ids"] = [1001, 1002]
+    payload["feishu"]["enabled"] = True
+    payload["feishu"]["app_id"] = "cli_test"
+    payload["feishu"]["app_secret"] = "secret_test"
+    payload["feishu"]["allowed_chat_ids"] = ["oc_xxx"]
+    payload["feishu"]["allowed_open_ids"] = ["ou_xxx"]
+    payload["feishu"]["reply_in_thread"] = False
     payload["copilot"]["model"] = "gpt-5"
     payload["copilot"]["available_models"] = ["gpt-5", "gpt-5-mini"]
     payload["copilot"]["allow_all_paths"] = True
@@ -106,8 +119,15 @@ def test_load_settings_reads_json_config_and_creates_runtime_dirs(tmp_path: Path
 
     settings = load_settings(paths.home_dir)
 
+    assert settings.telegram_enabled is True
     assert settings.telegram_bot_token == "telegram-token"
     assert settings.allowed_chat_ids == {1001, 1002}
+    assert settings.feishu_enabled is True
+    assert settings.feishu_app_id == "cli_test"
+    assert settings.feishu_app_secret == "secret_test"
+    assert settings.feishu_allowed_chat_ids == {"oc_xxx"}
+    assert settings.feishu_allowed_open_ids == {"ou_xxx"}
+    assert settings.feishu_reply_in_thread is False
     assert settings.copilot_cli_model == "gpt-5"
     assert settings.copilot_available_models == ["gpt-5", "gpt-5-mini"]
     assert settings.copilot_cli_allow_all_paths is True
@@ -140,6 +160,37 @@ def test_load_settings_requires_non_empty_bot_token(tmp_path: Path) -> None:
         load_settings(paths.home_dir)
 
 
+def test_load_settings_accepts_feishu_only_mode(tmp_path: Path) -> None:
+    paths = build_app_paths(tmp_path / "app")
+    payload = default_config_payload(paths)
+    payload["telegram"]["enabled"] = False
+    payload["feishu"]["enabled"] = True
+    payload["feishu"]["app_id"] = "cli_test"
+    payload["feishu"]["app_secret"] = "secret_test"
+
+    write_config(payload, paths.config_file)
+
+    settings = load_settings(paths.home_dir)
+
+    assert settings.telegram_enabled is False
+    assert settings.telegram_bot_token is None
+    assert settings.feishu_enabled is True
+    assert settings.feishu_app_id == "cli_test"
+
+
+def test_load_settings_requires_at_least_one_enabled_platform(tmp_path: Path) -> None:
+    paths = build_app_paths(tmp_path / "app")
+    payload = default_config_payload(paths)
+    payload["telegram"]["enabled"] = False
+    payload["feishu"]["enabled"] = False
+    payload["telegram"]["bot_token"] = ""
+
+    write_config(payload, paths.config_file)
+
+    with pytest.raises(ConfigurationError, match="至少需要启用一个接入平台"):
+        load_settings(paths.home_dir)
+
+
 def test_doctor_report_shows_missing_config_and_existing_runtime_dirs(tmp_path: Path) -> None:
     paths = build_app_paths(tmp_path / "app")
     paths.home_dir.mkdir(parents=True, exist_ok=True)
@@ -151,7 +202,10 @@ def test_doctor_report_shows_missing_config_and_existing_runtime_dirs(tmp_path: 
 
     assert report.has_config is False
     assert report.config_status == "missing"
+    assert report.telegram_enabled is False
     assert report.telegram_token_status == "unknown"
+    assert report.feishu_enabled is False
+    assert report.feishu_app_status == "unknown"
     assert report.data_dir_exists is True
     assert report.logs_dir_exists is True
     assert report.workspace_dir_exists is True
@@ -165,6 +219,9 @@ def test_doctor_report_extracts_core_fields_from_valid_config(tmp_path: Path) ->
     workspace.mkdir()
     payload = default_config_payload(paths)
     payload["telegram"]["bot_token"] = "telegram-token"
+    payload["feishu"]["enabled"] = True
+    payload["feishu"]["app_id"] = "cli_test"
+    payload["feishu"]["app_secret"] = "secret_test"
     payload["copilot"]["cli_command"] = fake_copilot.as_posix()
     payload["copilot"]["model"] = "gpt-5"
     payload["copilot"]["timeout_seconds"] = 180
@@ -176,7 +233,10 @@ def test_doctor_report_extracts_core_fields_from_valid_config(tmp_path: Path) ->
 
     assert report.has_config is True
     assert report.config_status == "ok"
+    assert report.telegram_enabled is True
     assert report.telegram_token_status == "set"
+    assert report.feishu_enabled is True
+    assert report.feishu_app_status == "set"
     assert report.copilot_cli_command == fake_copilot.as_posix()
     assert report.copilot_cli_resolved_command == fake_copilot.as_posix()
     assert report.copilot_cli_runnable is True
@@ -192,6 +252,10 @@ def test_doctor_report_collects_configuration_issues(tmp_path: Path) -> None:
     missing_workspace = tmp_path / "missing-workspace"
     payload = default_config_payload(paths)
     payload["telegram"]["bot_token"] = ""
+    payload["telegram"]["enabled"] = False
+    payload["feishu"]["enabled"] = True
+    payload["feishu"]["app_id"] = ""
+    payload["feishu"]["app_secret"] = ""
     payload["copilot"]["cli_command"] = (tmp_path / "missing-copilot.cmd").as_posix()
     payload["copilot"]["timeout_seconds"] = 0
     payload["runtime"]["workspace_root"] = missing_workspace.as_posix()
@@ -202,9 +266,12 @@ def test_doctor_report_collects_configuration_issues(tmp_path: Path) -> None:
 
     assert report.config_status == "ok"
     assert report.telegram_token_status == "empty"
+    assert report.feishu_enabled is True
+    assert report.feishu_app_status == "empty"
     assert report.copilot_cli_runnable is False
     assert report.runtime_workspace_exists is False
-    assert "telegram.bot_token 为空" in report.issues
+    assert "feishu.app_id 为空" in report.issues
+    assert "feishu.app_secret 为空" in report.issues
     assert "copilot.timeout_seconds 必须大于 0" in report.issues
     assert f"工作区不存在: {missing_workspace.as_posix()}" in report.issues
 
@@ -216,6 +283,9 @@ def test_run_doctor_prints_extended_health_summary(tmp_path: Path, capsys: pytes
     paths.workspace_dir.mkdir(parents=True, exist_ok=True)
     payload = default_config_payload(paths)
     payload["telegram"]["bot_token"] = "telegram-token"
+    payload["feishu"]["enabled"] = True
+    payload["feishu"]["app_id"] = "cli_test"
+    payload["feishu"]["app_secret"] = "secret_test"
     payload["copilot"]["cli_command"] = fake_copilot.as_posix()
     payload["copilot"]["model"] = "gpt-5"
 
@@ -230,7 +300,10 @@ def test_run_doctor_prints_extended_health_summary(tmp_path: Path, capsys: pytes
     assert "config=" in captured.out
     assert "has_config=True" in captured.out
     assert "config_status=ok" in captured.out
+    assert "telegram_enabled=True" in captured.out
     assert "telegram_token=set" in captured.out
+    assert "feishu_enabled=True" in captured.out
+    assert "feishu_app=set" in captured.out
     assert f"copilot_cli_command={fake_copilot.as_posix()}" in captured.out
     assert f"copilot_cli_resolved_command={fake_copilot.as_posix()}" in captured.out
     assert "copilot_cli_runnable=True" in captured.out

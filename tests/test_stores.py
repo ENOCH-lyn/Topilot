@@ -52,6 +52,20 @@ def test_conversation_store_skips_malformed_persisted_turns_and_creates_parent_d
     assert missing_parent_path.exists()
 
 
+def test_conversation_store_preserves_other_channel_history_across_instances(tmp_path: Path) -> None:
+    db_path = tmp_path / "shared-chats.json"
+    telegram_store = ConversationStore(db_path, max_turns_per_chat=10)
+    feishu_store = ConversationStore(db_path, max_turns_per_chat=10)
+
+    telegram_store.append_turn(8503145376, "user", "tg-hello")
+    feishu_store.append_turn("feishu:oc_demo", "user", "fs-hello")
+
+    reloaded = ConversationStore(db_path, max_turns_per_chat=10)
+
+    assert [turn.content for turn in reloaded.recent(8503145376, limit=10)] == ["tg-hello"]
+    assert [turn.content for turn in reloaded.recent("feishu:oc_demo", limit=10)] == ["fs-hello"]
+
+
 def test_session_store_tracks_active_session_and_model(tmp_path: Path) -> None:
     db_path = tmp_path / "sessions.json"
     store = SessionStore(db_path)
@@ -110,6 +124,25 @@ def test_session_store_sanitizes_malformed_payload_and_stale_active_session(tmp_
     new_store.create_session(100, title="created")
 
     assert missing_parent_path.exists()
+
+
+def test_session_store_preserves_other_channel_sessions_across_instances(tmp_path: Path) -> None:
+    db_path = tmp_path / "shared-sessions.json"
+    telegram_store = SessionStore(db_path)
+    feishu_store = SessionStore(db_path)
+
+    tg_session = telegram_store.create_session(8503145376, title="tg-main")
+    telegram_store.set_model(8503145376, "gpt-5-mini")
+
+    fs_session = feishu_store.create_session("feishu:oc_demo", title="fs-main")
+    feishu_store.set_model("feishu:oc_demo", "gpt-5.5")
+
+    reloaded = SessionStore(db_path)
+
+    assert reloaded.active_session(8503145376) == tg_session
+    assert reloaded.active_model(8503145376) == "gpt-5-mini"
+    assert reloaded.active_session("feishu:oc_demo") == fs_session
+    assert reloaded.active_model("feishu:oc_demo") == "gpt-5.5"
 
 
 def test_session_store_requires_unique_prefix_when_switching(tmp_path: Path) -> None:

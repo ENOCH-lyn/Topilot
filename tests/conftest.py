@@ -31,8 +31,15 @@ def make_settings(tmp_path: Path):
         log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
         payload = dict(
+            telegram_enabled=True,
             telegram_bot_token="test-token",
             allowed_chat_ids={123456},
+            feishu_enabled=False,
+            feishu_app_id=None,
+            feishu_app_secret=None,
+            feishu_allowed_chat_ids=set(),
+            feishu_allowed_open_ids=set(),
+            feishu_reply_in_thread=True,
             workspace_root=workspace_root,
             chat_db_path=chat_db_path,
             session_db_path=session_db_path,

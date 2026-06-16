@@ -6,15 +6,15 @@
 ## 2. 总体架构概览
 
 ```text
-Telegram 用户
-    ↓
-telegram_bot.py
-    ↓
-task_runner.py
-    ↓
-agent.py
-    ↓
-本地 Copilot CLI
+Telegram 用户 / Feishu 用户
+        ↓
+telegram_bot.py / feishu_bot.py
+        ↓
+     task_runner.py
+        ↓
+       agent.py
+        ↓
+   本地 Copilot CLI
 
 并行支撑模块：
 - config.py / paths.py：配置与目录
@@ -24,7 +24,7 @@ agent.py
 - logging_setup.py：日志
 ```
 
-## 3. ADR-001：采用 Telegram Bot 作为远程交互入口
+## 3. ADR-001：采用 Telegram + Feishu 作为远程交互入口
 
 ### 3.1 决策背景
 项目的核心诉求是“离开电脑后继续使用本地 Copilot”，因此需要一个已普及、移动端体验成熟、接入成本低的远程交互渠道。
@@ -33,14 +33,15 @@ agent.py
 1. 自研 Web 前端 + 后端接口
 2. 桌面远程控制方案
 3. Telegram Bot
+4. Feishu Bot
 
 ### 3.3 决策结果
-选择 Telegram Bot 作为当前版本唯一正式交互入口。
+选择 Telegram Bot 作为主交互入口，并补充 Feishu Bot 作为并行文本入口。
 
 ### 3.4 选择原因
-1. Telegram 天然具备移动端可用性和消息推送能力。
-2. `python-telegram-bot` 可快速实现命令、按钮、回调和长轮询。
-3. 不需要额外开发前端页面，能够降低实现复杂度与维护成本。
+1. Telegram 天然具备移动端可用性和消息推送能力，适合完成命令、按钮和会话管理主流程。
+2. Feishu 适合在国内办公或校园环境中接入现有聊天体系，长连接事件模式与本项目本地常驻运行形态匹配。
+3. `python-telegram-bot` 与 `lark-oapi` 都能快速完成消息入口接入，不需要额外开发前端页面。
 
 ### 3.5 优缺点
 优点：
@@ -49,9 +50,9 @@ agent.py
 3. 适合个人工具的轻量交互模式。
 
 缺点：
-1. 界面能力受 Telegram 原生消息交互限制。
-2. 长文本、富交互和复杂表单能力有限。
-3. 依赖 Telegram 网络可达性。
+1. 界面能力受聊天平台原生消息交互限制。
+2. Telegram 与 Feishu 两套接入层需要分别维护。
+3. 依赖对应平台网络可达性与账号配置状态。
 
 ## 4. ADR-002：采用本地 Copilot CLI 桥接，而不是直接接入模型 API
 
@@ -93,11 +94,11 @@ agent.py
 3. Bot 接入层与任务执行层分离为多个进程
 
 ### 5.3 决策结果
-选择单进程长轮询。
+选择“Telegram 长轮询 + Feishu 长连接后台线程”的单进程架构。
 
 ### 5.4 选择原因
-1. `application.run_polling()` 足以满足个人场景。
-2. 不需要暴露公网回调地址，部署更简单。
+1. `application.run_polling()` 足以满足 Telegram 个人场景。
+2. Feishu 长连接不需要公网回调地址，适合本地常驻进程。
 3. 单进程更易与本地 Copilot CLI 和文件存储协同。
 
 ### 5.5 优缺点
@@ -199,7 +200,7 @@ agent.py
 ### 9.1 模块边界
 1. `cli/main.py`：CLI 命令入口，只负责初始化、启动和诊断。
 2. `config.py` + `paths.py` + `logging_setup.py`：环境与基础设施。
-3. `telegram_bot.py`：Telegram 层输入输出和交互组件。
+3. `telegram_bot.py` + `feishu_bot.py`：平台接入层输入输出与交互组件。
 4. `task_runner.py`：业务编排和模块协调中心。
 5. `agent.py`：Copilot CLI 调用与流式事件解释器。
 6. `conversation_store.py` + `session_store.py`：本地状态持久化。
@@ -221,6 +222,6 @@ agent.py
 ## 10. 架构约束与技术边界
 1. 当前版本必须保持单实例单进程运行假设。
 2. 当前版本必须保持本地文件存储，不引入数据库耦合。
-3. 当前版本必须保持 Telegram 作为唯一正式 UI 入口。
+3. 当前版本必须保持 Telegram 与 Feishu 作为聊天平台入口，不扩展为 Web UI。
 4. 当前版本必须保持与 GitHub Copilot CLI 的本地桥接关系，而不是替换为其他模型 API。
 5. 当前版本不以跨平台完美兼容为目标，Windows + PowerShell 是首要适配环境。

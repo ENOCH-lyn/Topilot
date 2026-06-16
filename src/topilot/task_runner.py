@@ -11,7 +11,8 @@ from topilot.config import Settings
 from topilot.conversation_store import ConversationStore
 from topilot.session_store import SessionStore
 
-SendMessage = Callable[[int, str], Awaitable[None]]
+ChatKey = str | int
+SendMessage = Callable[[ChatKey, str], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class LiveProgress(Protocol):
     async def close(self, final_text: str | None = None, failed: bool = False) -> None: ...
 
 
-OpenLiveProgress = Callable[[int, str], Awaitable[LiveProgress]]
+OpenLiveProgress = Callable[[ChatKey, str], Awaitable[LiveProgress]]
 
 
 class TaskRunner:
@@ -69,7 +70,7 @@ class TaskRunner:
             )
         return result
 
-    def session_menu_items(self, chat_id: int, limit: int = 20) -> list[dict]:
+    def session_menu_items(self, chat_id: ChatKey, limit: int = 20) -> list[dict]:
         """返回会话管理菜单项（已保存 + 本机发现）"""
 
         discovered = self.refresh_discovered_sessions(limit=40)
@@ -117,7 +118,7 @@ class TaskRunner:
             item["active"] = item["id"] == active
         return merged[:limit]
 
-    def takeover_session(self, chat_id: int, session_id: str) -> str:
+    def takeover_session(self, chat_id: ChatKey, session_id: str) -> str:
         """接管指定会话并切换为当前会话"""
 
         info = self._discovered_sessions.get(session_id) or self._inspector.get_session(session_id)
@@ -139,7 +140,7 @@ class TaskRunner:
             return "未找到该会话"
         return f"已接管会话: {chosen}"
 
-    def delete_session(self, chat_id: int, session_id: str, delete_local: bool = True) -> str:
+    def delete_session(self, chat_id: ChatKey, session_id: str, delete_local: bool = True) -> str:
         """删除会话（可选删除本地 session-state）"""
 
         removed_store = self._sessions.delete_session(chat_id, session_id)
@@ -155,7 +156,7 @@ class TaskRunner:
             return "会话已删除"
         return "会话不存在或无法删除"
 
-    def session_detail_text(self, chat_id: int, session_id: str) -> str:
+    def session_detail_text(self, chat_id: ChatKey, session_id: str) -> str:
         """返回会话详情文本"""
 
         info = self._inspector.get_session(session_id)
@@ -174,7 +175,7 @@ class TaskRunner:
             f"当前激活: {'是' if active == session_id else '否'}"
         )
 
-    def session_history_text(self, chat_id: int, session_id: str) -> str:
+    def session_history_text(self, chat_id: ChatKey, session_id: str) -> str:
         """返回会话历史摘要文本"""
 
         info = self._inspector.get_session(session_id)
@@ -185,7 +186,7 @@ class TaskRunner:
         body = "\n".join(f"- {line}" for line in lines[-12:])
         return f"{head}\n\n最近历史:\n{body}"
 
-    def session_live_payload(self, chat_id: int, session_id: str) -> dict:
+    def session_live_payload(self, chat_id: ChatKey, session_id: str) -> dict:
         """返回会话实时展示载荷
 
         用于 bot 侧轮询刷新运行中会话输出
@@ -214,7 +215,7 @@ class TaskRunner:
             "last_event_at": info.last_event_at,
         }
 
-    async def submit(self, chat_id: int, instruction: str) -> None:
+    async def submit(self, chat_id: ChatKey, instruction: str) -> None:
         """处理一次用户请求并回传结果"""
 
         logger.info("收到请求 chat_id=%s instruction_len=%s", chat_id, len(instruction.strip()))
@@ -268,7 +269,7 @@ class TaskRunner:
 
         logger.info("请求处理完成 chat_id=%s session=%s reply_len=%s", chat_id, active_session_id, len(reply))
 
-    async def _start_live_progress(self, chat_id: int, instruction: str) -> LiveProgress | None:
+    async def _start_live_progress(self, chat_id: ChatKey, instruction: str) -> LiveProgress | None:
         """按需创建流式展示对象"""
 
         if self._open_live_progress is None:
@@ -278,7 +279,7 @@ class TaskRunner:
             title = title[:80] + "..."
         return await self._open_live_progress(chat_id, title)
 
-    def status_text(self, chat_id: int) -> str:
+    def status_text(self, chat_id: ChatKey) -> str:
         """返回后端状态与当前会话信息"""
 
         session_id = self._sessions.ensure_active_session(chat_id)
@@ -300,19 +301,19 @@ class TaskRunner:
             f"最近活动: {last_event_at}"
         )
 
-    def llm_status_text(self, chat_id: int | None = None) -> str:
+    def llm_status_text(self, chat_id: ChatKey | None = None) -> str:
         """返回 LLM 状态文本"""
         model = self._sessions.active_model(chat_id) if chat_id is not None else None
         return self._planner.llm_status_text(model)
 
-    def llm_diagnostic_text(self, chat_id: int | None = None) -> str:
+    def llm_diagnostic_text(self, chat_id: ChatKey | None = None) -> str:
         """返回 LLM 后端详细诊断文本"""
 
         model = self._sessions.active_model(chat_id) if chat_id is not None else None
         diagnostic = self._planner.diagnose_copilot_cli(model=model)
         return diagnostic.render(available_models=self._cached_models)
 
-    def current_model(self, chat_id: int) -> str:
+    def current_model(self, chat_id: ChatKey) -> str:
         """返回当前 chat 有效的模型"""
         return self._sessions.active_model(chat_id) or self._settings.copilot_cli_model
 
@@ -323,12 +324,12 @@ class TaskRunner:
         """
         return list(self._cached_models)
 
-    def set_model(self, chat_id: int, model: str) -> None:
+    def set_model(self, chat_id: ChatKey, model: str) -> None:
         """为指定 chat 设置当前模型"""
         self._sessions.set_model(chat_id, model)
         logger.info("模型已切换 chat_id=%s model=%s", chat_id, model)
 
-    def session_current_text(self, chat_id: int) -> str:
+    def session_current_text(self, chat_id: ChatKey) -> str:
         """返回当前会话简要摘要"""
         session_id = self._sessions.ensure_active_session(chat_id)
         session_meta = self._active_session_summary(chat_id, session_id)
@@ -346,7 +347,7 @@ class TaskRunner:
             f"工作区: {workspace}"
         )
 
-    def session_list_text(self, chat_id: int) -> str:
+    def session_list_text(self, chat_id: ChatKey) -> str:
         """返回会话列表文本，按最近使用时间排序，标记当前会话"""
         sessions = self._sessions.list_sessions(chat_id, limit=12)
         if not sessions:
@@ -360,12 +361,12 @@ class TaskRunner:
             lines.append(f"{mark} {sid[:8]} | {title} | {item.get('last_used_at', '')}")
         return "Copilot 会话列表(*为当前):\n" + "\n".join(lines)
 
-    def session_new_text(self, chat_id: int, title: str | None = None) -> str:
+    def session_new_text(self, chat_id: ChatKey, title: str | None = None) -> str:
         """新建会话并切换"""
         session_id = self._sessions.create_session(chat_id, title=title or "manual-new")
         return f"已新建并切换会话: {session_id}"
 
-    def session_use_text(self, chat_id: int, session_id_prefix: str) -> str:
+    def session_use_text(self, chat_id: ChatKey, session_id_prefix: str) -> str:
         """切换会话到指定 ID 前缀的会话"""
         needle = session_id_prefix.strip().lower()
         if not needle:
@@ -397,7 +398,7 @@ class TaskRunner:
         suffix = f" 等 {len(matches)} 个" if omitted > 0 else ""
         return f"会话前缀不唯一: {prefix}，匹配 {previews}{suffix}；请提供更长的 session_id 前缀"
 
-    def _active_session_summary(self, chat_id: int, session_id: str) -> dict:
+    def _active_session_summary(self, chat_id: ChatKey, session_id: str) -> dict:
         """返回当前会话摘要，本地 session-state 的实时信息优先于旧持久化记录"""
 
         stored = self._sessions.get_session(chat_id, session_id) or {}

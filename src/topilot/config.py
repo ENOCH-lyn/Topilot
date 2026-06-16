@@ -2,6 +2,7 @@ from __future__ import annotations
 """项目配置加载模块"""
 
 import json
+import importlib.util
 import shutil
 from datetime import datetime
 from dataclasses import dataclass
@@ -51,12 +52,25 @@ def _parse_string_list(value: object) -> list[str]:
     return result
 
 
+def _parse_string_set(value: object) -> set[str]:
+    """解析字符串集合，支持数组或逗号分隔字符串"""
+
+    return set(_parse_string_list(value))
+
+
 @dataclass(slots=True)
 class Settings:
     """应用运行配置"""
 
-    telegram_bot_token: str
+    telegram_enabled: bool
+    telegram_bot_token: str | None
     allowed_chat_ids: set[int]
+    feishu_enabled: bool
+    feishu_app_id: str | None
+    feishu_app_secret: str | None
+    feishu_allowed_chat_ids: set[str]
+    feishu_allowed_open_ids: set[str]
+    feishu_reply_in_thread: bool
     workspace_root: Path
     chat_db_path: Path
     session_db_path: Path
@@ -94,7 +108,10 @@ class DoctorReport:
     config_path: Path
     has_config: bool
     config_status: str
+    telegram_enabled: bool
     telegram_token_status: str
+    feishu_enabled: bool
+    feishu_app_status: str
     copilot_cli_command: str | None
     copilot_cli_resolved_command: str | None
     copilot_cli_runnable: bool | None
@@ -216,9 +233,18 @@ def default_config_payload(paths: AppPaths) -> dict:
 
     return {
         "telegram": {
+            "enabled": True,
             "bot_token": "",
             "allowed_chat_ids": [],
             "proxy_url": None,
+        },
+        "feishu": {
+            "enabled": False,
+            "app_id": "",
+            "app_secret": "",
+            "allowed_chat_ids": [],
+            "allowed_open_ids": [],
+            "reply_in_thread": True,
         },
         "copilot": {
             "cli_command": "copilot",
@@ -280,7 +306,10 @@ def doctor_report(app_home: Path | None = None) -> DoctorReport:
     has_cfg = config_path.exists()
 
     config_status = "missing"
+    telegram_enabled = False
     telegram_token_status = "unknown"
+    feishu_enabled = False
+    feishu_app_status = "unknown"
     copilot_cli_command: str | None = None
     copilot_cli_resolved_command: str | None = None
     copilot_cli_runnable: bool | None = None
@@ -296,17 +325,41 @@ def doctor_report(app_home: Path | None = None) -> DoctorReport:
         except ConfigurationError:
             config_status = "invalid"
             telegram_token_status = "invalid"
+            feishu_app_status = "invalid"
             issues.append("配置文件不是合法 JSON 对象")
         else:
             config_status = "ok"
             telegram = payload.get("telegram") if isinstance(payload.get("telegram"), dict) else {}
+            feishu = payload.get("feishu") if isinstance(payload.get("feishu"), dict) else {}
             copilot = payload.get("copilot") if isinstance(payload.get("copilot"), dict) else {}
             runtime = payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}
 
+            telegram_enabled = _parse_bool(telegram.get("enabled"), True)
             token = str(telegram.get("bot_token") or "").strip()
             telegram_token_status = "set" if token else "empty"
-            if not token:
+            if telegram_enabled and not token:
                 issues.append("telegram.bot_token 为空")
+
+            feishu_enabled = _parse_bool(feishu.get("enabled"), False)
+            feishu_app_id = str(feishu.get("app_id") or "").strip()
+            feishu_app_secret = str(feishu.get("app_secret") or "").strip()
+            if feishu_enabled:
+                if feishu_app_id and feishu_app_secret:
+                    feishu_app_status = "set"
+                else:
+                    feishu_app_status = "empty"
+                    if not feishu_app_id:
+                        issues.append("feishu.app_id 为空")
+                    if not feishu_app_secret:
+                        issues.append("feishu.app_secret 为空")
+                if importlib.util.find_spec("lark_oapi") is None:
+                    issues.append("未安装 lark-oapi，无法启动 Feishu 机器人")
+            else:
+                feishu_app_status = "disabled"
+
+            if not telegram_enabled and not feishu_enabled:
+                issues.append("至少需要启用一个接入平台：telegram.enabled 或 feishu.enabled")
+
             copilot_cli_command = str(copilot.get("cli_command") or "copilot").strip() or "copilot"
             copilot_cli_resolved_command = _resolve_command_for_report(copilot_cli_command)
             copilot_cli_runnable = _command_is_runnable_for_report(copilot_cli_command)
@@ -328,7 +381,10 @@ def doctor_report(app_home: Path | None = None) -> DoctorReport:
         config_path=config_path,
         has_config=has_cfg,
         config_status=config_status,
+        telegram_enabled=telegram_enabled,
         telegram_token_status=telegram_token_status,
+        feishu_enabled=feishu_enabled,
+        feishu_app_status=feishu_app_status,
         copilot_cli_command=copilot_cli_command,
         copilot_cli_resolved_command=copilot_cli_resolved_command,
         copilot_cli_runnable=copilot_cli_runnable,
@@ -351,14 +407,26 @@ def load_settings(app_home: Path | None = None) -> Settings:
 
     payload = _read_json_config(paths.config_file)
     telegram = payload.get("telegram") if isinstance(payload.get("telegram"), dict) else {}
+    feishu = payload.get("feishu") if isinstance(payload.get("feishu"), dict) else {}
     copilot = payload.get("copilot") if isinstance(payload.get("copilot"), dict) else {}
     runtime = payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}
     storage = payload.get("storage") if isinstance(payload.get("storage"), dict) else {}
     logging_cfg = payload.get("logging") if isinstance(payload.get("logging"), dict) else {}
 
+    telegram_enabled = _parse_bool(telegram.get("enabled"), True)
     token = str(telegram.get("bot_token") or "").strip()
-    if not token:
+    if telegram_enabled and not token:
         raise ConfigurationError(f"配置项 telegram.bot_token 为空: {paths.config_file}")
+
+    feishu_enabled = _parse_bool(feishu.get("enabled"), False)
+    feishu_app_id = str(feishu.get("app_id") or "").strip() or None
+    feishu_app_secret = str(feishu.get("app_secret") or "").strip() or None
+    if feishu_enabled and not feishu_app_id:
+        raise ConfigurationError(f"配置项 feishu.app_id 为空: {paths.config_file}")
+    if feishu_enabled and not feishu_app_secret:
+        raise ConfigurationError(f"配置项 feishu.app_secret 为空: {paths.config_file}")
+    if not telegram_enabled and not feishu_enabled:
+        raise ConfigurationError(f"至少需要启用一个接入平台: {paths.config_file}")
 
     workspace_root = Path(str(runtime.get("workspace_root") or paths.workspace_dir.as_posix())).expanduser().resolve()
     chat_db_path = Path(str(storage.get("chat_db_path") or paths.chat_db_file.as_posix())).expanduser().resolve()
@@ -371,8 +439,15 @@ def load_settings(app_home: Path | None = None) -> Settings:
     log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
     return Settings(
-        telegram_bot_token=token,
+        telegram_enabled=telegram_enabled,
+        telegram_bot_token=(token or None),
         allowed_chat_ids=_parse_chat_ids(telegram.get("allowed_chat_ids")),
+        feishu_enabled=feishu_enabled,
+        feishu_app_id=feishu_app_id,
+        feishu_app_secret=feishu_app_secret,
+        feishu_allowed_chat_ids=_parse_string_set(feishu.get("allowed_chat_ids")),
+        feishu_allowed_open_ids=_parse_string_set(feishu.get("allowed_open_ids")),
+        feishu_reply_in_thread=_parse_bool(feishu.get("reply_in_thread"), True),
         workspace_root=workspace_root,
         chat_db_path=chat_db_path,
         session_db_path=session_db_path,
