@@ -8,6 +8,10 @@ from unittest.mock import MagicMock
 from topilot.feishu_bot import (
     _FeishuActionContext,
     _FeishuLiveProgress,
+    _CARD_SESSION_DETAIL,
+    _CARD_SESSION_HISTORY,
+    _CARD_SESSIONS_PAGE,
+    _CARD_SESSION_USE,
     _MENU_MODEL,
     _CARD_MODEL_SET,
     _CARD_STATUS,
@@ -275,10 +279,12 @@ def test_feishu_card_action_returns_updated_card(make_settings) -> None:
             self.toast = None
             self.card = None
 
-    def fake_dispatch_sync(context, action: str, *, model: str | None = None):
+    def fake_dispatch_sync(context, action: str, *, model: str | None = None, session_id: str | None = None, page: int = 0):
         assert context.target.session_key == "feishu:oc_card"
         assert context.message_id == "om_card"
         assert action == _CARD_STATUS
+        assert page == 0
+        assert session_id == ""
         return card_json
 
     runner._dispatch_action_sync = fake_dispatch_sync
@@ -325,8 +331,9 @@ def test_feishu_card_action_sync_returns_response_without_event_loop_wait(make_s
             self.toast = None
             self.card = None
 
-    def fake_dispatch_sync(context, action: str, *, model: str | None = None):
+    def fake_dispatch_sync(context, action: str, *, model: str | None = None, session_id: str | None = None, page: int = 0):
         captured.append((action, model))
+        assert session_id == ""
         return json.dumps({"sync": True}, ensure_ascii=False)
 
     runner._dispatch_action_sync = fake_dispatch_sync
@@ -348,25 +355,433 @@ def test_feishu_card_action_sync_returns_response_without_event_loop_wait(make_s
     assert response.card.data == {"sync": True}
 
 
-def test_feishu_live_progress_creates_then_updates_card(make_settings) -> None:
+def test_feishu_card_action_sync_parses_sessions_page_value(make_settings) -> None:
     settings = make_settings(
         feishu_enabled=True,
         feishu_app_id="cli_test",
         feishu_app_secret="secret_test",
     )
     runner = FeishuBotRunner(settings)
-    sent: list[str] = []
-    updated: list[tuple[str, str]] = []
+    captured: list[tuple[str, int]] = []
 
-    async def fake_send_card(target, card_json: str) -> str:
-        sent.append(card_json)
-        return "om_progress"
+    class FakeCallbackCard:
+        def __init__(self) -> None:
+            self.type = None
+            self.data = None
 
-    async def fake_update_card(message_id: str, card_json: str) -> None:
-        updated.append((message_id, card_json))
+    class FakeCallbackToast:
+        def __init__(self) -> None:
+            self.type = None
+            self.content = None
 
-    runner._send_card_message = fake_send_card
-    runner._update_card_message = fake_update_card
+    class FakeCallbackResponse:
+        def __init__(self) -> None:
+            self.toast = None
+            self.card = None
+
+    def fake_dispatch_sync(context, action: str, *, model: str | None = None, session_id: str | None = None, page: int = 0):
+        captured.append((action, page))
+        assert session_id == ""
+        return json.dumps({"page": page}, ensure_ascii=False)
+
+    runner._dispatch_action_sync = fake_dispatch_sync
+    runner._callback_card = FakeCallbackCard
+    runner._callback_toast = FakeCallbackToast
+    runner._callback_response = FakeCallbackResponse
+    payload = SimpleNamespace(
+        event=SimpleNamespace(
+            operator=SimpleNamespace(open_id="ou_card"),
+            context=SimpleNamespace(open_chat_id="oc_card", open_message_id="om_card"),
+            action=SimpleNamespace(value={"action": _CARD_SESSIONS_PAGE, "page": "2"}),
+        )
+    )
+
+    response = runner._handle_card_action_sync(payload)
+
+    assert captured == [(_CARD_SESSIONS_PAGE, 2)]
+    assert response.card.data == {"page": 2}
+
+
+def test_feishu_card_action_sync_parses_session_use_value(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    captured: list[tuple[str, str | None, int]] = []
+
+    class FakeCallbackCard:
+        def __init__(self) -> None:
+            self.type = None
+            self.data = None
+
+    class FakeCallbackToast:
+        def __init__(self) -> None:
+            self.type = None
+            self.content = None
+
+    class FakeCallbackResponse:
+        def __init__(self) -> None:
+            self.toast = None
+            self.card = None
+
+    def fake_dispatch_sync(context, action: str, *, model: str | None = None, session_id: str | None = None, page: int = 0):
+        captured.append((action, session_id, page))
+        return json.dumps({"session_id": session_id, "page": page}, ensure_ascii=False)
+
+    runner._dispatch_action_sync = fake_dispatch_sync
+    runner._callback_card = FakeCallbackCard
+    runner._callback_toast = FakeCallbackToast
+    runner._callback_response = FakeCallbackResponse
+    payload = SimpleNamespace(
+        event=SimpleNamespace(
+            operator=SimpleNamespace(open_id="ou_card"),
+            context=SimpleNamespace(open_chat_id="oc_card", open_message_id="om_card"),
+            action=SimpleNamespace(value={"action": _CARD_SESSION_USE, "session_id": "session-123", "page": "1"}),
+        )
+    )
+
+    response = runner._handle_card_action_sync(payload)
+
+    assert captured == [(_CARD_SESSION_USE, "session-123", 1)]
+    assert response.card.data == {"session_id": "session-123", "page": 1}
+
+
+def test_feishu_card_action_sync_parses_session_detail_value(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    captured: list[tuple[str, str | None, int]] = []
+
+    class FakeCallbackCard:
+        def __init__(self) -> None:
+            self.type = None
+            self.data = None
+
+    class FakeCallbackToast:
+        def __init__(self) -> None:
+            self.type = None
+            self.content = None
+
+    class FakeCallbackResponse:
+        def __init__(self) -> None:
+            self.toast = None
+            self.card = None
+
+    def fake_dispatch_sync(context, action: str, *, model: str | None = None, session_id: str | None = None, page: int = 0):
+        captured.append((action, session_id, page))
+        return json.dumps({"detail": session_id, "page": page}, ensure_ascii=False)
+
+    runner._dispatch_action_sync = fake_dispatch_sync
+    runner._callback_card = FakeCallbackCard
+    runner._callback_toast = FakeCallbackToast
+    runner._callback_response = FakeCallbackResponse
+    payload = SimpleNamespace(
+        event=SimpleNamespace(
+            operator=SimpleNamespace(open_id="ou_card"),
+            context=SimpleNamespace(open_chat_id="oc_card", open_message_id="om_card"),
+            action=SimpleNamespace(value={"action": _CARD_SESSION_DETAIL, "session_id": "session-456", "page": "3"}),
+        )
+    )
+
+    response = runner._handle_card_action_sync(payload)
+
+    assert captured == [(_CARD_SESSION_DETAIL, "session-456", 3)]
+    assert response.card.data == {"detail": "session-456", "page": 3}
+
+
+def test_feishu_send_result_message_uses_plain_text(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    sent: list[tuple[str, str]] = []
+
+    async def fake_send_text(target, text: str) -> None:
+        sent.append((target.session_key, text))
+
+    runner._send_text_message = fake_send_text
+
+    asyncio.run(runner._send_result_message(runner._chat_target("oc_chat_1"), "最终回复"))
+
+    assert sent == [("feishu:oc_chat_1", "最终回复")]
+
+
+def test_feishu_sessions_card_uses_paginated_merged_items(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+
+    class FakeTaskRunner:
+        def session_menu_items(self, chat_key: str, limit: int = 20) -> list[dict]:
+            assert limit == 120
+            return [
+                {
+                    "id": f"session-{index:02d}",
+                    "title": f"title-{index}",
+                    "model": "gpt-5-mini",
+                    "source": "local",
+                    "running": index % 2 == 0,
+                    "active": index == 11,
+                }
+                for index in range(13)
+            ]
+
+    runner._runner = FakeTaskRunner()
+    context = _FeishuActionContext(target=runner._chat_target("oc_chat_1"), open_id="ou_test", chat_id="oc_chat_1")
+
+    card_json = runner._build_sessions_card(context, page=1)
+    payload = json.loads(card_json)
+    body = payload["elements"][0]["text"]["content"]
+    action_rows = [item["actions"] for item in payload["elements"] if item["tag"] == "action"]
+
+    assert "第 2/2 页，共 13 个会话" in body
+    assert "title-10" in body
+    assert "title-12" in body
+    assert any(action["value"]["action"] == _CARD_SESSIONS_PAGE and action["value"]["page"] == "0" for action in action_rows[0])
+    assert any(action["value"]["action"] == _CARD_SESSION_USE and action["value"]["session_id"] == "session-10" for row in action_rows[1:] for action in row)
+    assert any(action["value"]["action"] == _CARD_SESSION_DETAIL and action["value"]["session_id"] == "session-10" for row in action_rows[1:] for action in row)
+
+
+def test_feishu_dispatch_session_use_returns_history_card(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+
+    class FakeTaskRunner:
+        def session_use_text(self, chat_key: str, session_prefix: str) -> str:
+            assert chat_key == "feishu:oc_chat_1"
+            assert session_prefix == "session-123"
+            return "已切换到会话: session-123"
+
+        def session_history_text(self, chat_key: str, session_id: str) -> str:
+            assert chat_key == "feishu:oc_chat_1"
+            assert session_id == "session-123"
+            return "最近历史:\n- hello"
+
+    runner._runner = FakeTaskRunner()
+    context = _FeishuActionContext(target=runner._chat_target("oc_chat_1"), open_id="ou_test", chat_id="oc_chat_1")
+
+    card_json = asyncio.run(runner._dispatch_action(context, _CARD_SESSION_USE, session_id="session-123", page=0, return_card=True))
+
+    assert card_json is not None
+    assert "已切换到会话: session-123" in card_json
+    assert "最近历史" in card_json
+
+
+def test_feishu_dispatch_session_use_starts_live_watch_for_running_session(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    scheduled: list[asyncio.Task] = []
+    stopped_keys: list[str] = []
+
+    class FakeTaskRunner:
+        def session_use_text(self, chat_key: str, session_prefix: str) -> str:
+            return "已切换到会话: session-123"
+
+        def session_history_text(self, chat_key: str, session_id: str) -> str:
+            return "最近历史:\n- line"
+
+        def session_live_payload(self, chat_key: str, session_id: str) -> dict:
+            return {"exists": True, "running": True, "text": "x", "signature": "sig"}
+
+    async def fake_stop_all(session_key: str) -> None:
+        stopped_keys.append(session_key)
+
+    async def fake_watch(context, session_id: str, page: int = 0) -> None:
+        return None
+
+    def fake_create_task(coro):
+        task = SimpleNamespace(cancel=lambda: None, done=lambda: False)
+        scheduled.append(task)
+        coro.close()
+        return task
+
+    runner._runner = FakeTaskRunner()
+    runner._stop_all_session_watches = fake_stop_all
+    runner._watch_session_live = fake_watch
+    context = _FeishuActionContext(target=runner._chat_target("oc_chat_1"), open_id="ou_test", chat_id="oc_chat_1", message_id="om_card")
+
+    original_create_task = asyncio.create_task
+    asyncio.create_task = fake_create_task
+    try:
+        card_json = asyncio.run(runner._dispatch_action(context, _CARD_SESSION_USE, session_id="session-123", page=1, return_card=True))
+    finally:
+        asyncio.create_task = original_create_task
+
+    assert card_json is not None
+    assert "最近历史" in card_json
+    assert stopped_keys == ["feishu:oc_chat_1"]
+    assert "feishu:oc_chat_1:session-123" in runner._session_watch_tasks
+
+
+def test_feishu_dispatch_session_detail_renders_preview_card(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+
+    class FakeTaskRunner:
+        def session_detail_text(self, chat_key: str, session_id: str) -> str:
+            assert chat_key == "feishu:oc_chat_1"
+            assert session_id == "session-123"
+            return "会话: session-123\n状态: 运行中"
+
+    runner._runner = FakeTaskRunner()
+    context = _FeishuActionContext(target=runner._chat_target("oc_chat_1"), open_id="ou_test", chat_id="oc_chat_1")
+
+    card_json = asyncio.run(runner._dispatch_action(context, _CARD_SESSION_DETAIL, session_id="session-123", page=2, return_card=True))
+
+    assert card_json is not None
+    assert "会话: session-123" in card_json
+    assert "查看历史" in card_json
+
+
+def test_feishu_dispatch_session_history_starts_live_watch_for_running_session(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    scheduled: list[asyncio.Task] = []
+    stopped: list[str] = []
+
+    class FakeTaskRunner:
+        def session_history_text(self, chat_key: str, session_id: str) -> str:
+            return "最近历史:\n- line"
+
+        def session_live_payload(self, chat_key: str, session_id: str) -> dict:
+            return {"exists": True, "running": True, "text": "x", "signature": "sig"}
+
+    async def fake_stop(watch_key: str) -> None:
+        stopped.append(watch_key)
+
+    async def fake_watch(context, session_id: str, page: int = 0) -> None:
+        return None
+
+    def fake_create_task(coro):
+        task = SimpleNamespace(cancel=lambda: None, done=lambda: False)
+        scheduled.append(task)
+        coro.close()
+        return task
+
+    runner._runner = FakeTaskRunner()
+    runner._stop_session_watch = fake_stop
+    runner._watch_session_live = fake_watch
+    context = _FeishuActionContext(target=runner._chat_target("oc_chat_1"), open_id="ou_test", chat_id="oc_chat_1", message_id="om_card")
+
+    original_create_task = asyncio.create_task
+    asyncio.create_task = fake_create_task
+    try:
+        card_json = asyncio.run(runner._dispatch_action(context, _CARD_SESSION_HISTORY, session_id="session-123", page=1, return_card=True))
+    finally:
+        asyncio.create_task = original_create_task
+
+    assert card_json is not None
+    assert "最近历史" in card_json
+    assert stopped == ["feishu:oc_chat_1:session-123"]
+    assert "feishu:oc_chat_1:session-123" in runner._session_watch_tasks
+
+
+def test_feishu_card_action_sync_schedules_follow_up_for_live_session_cards(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    scheduled: list[object] = []
+
+    class FakeCallbackCard:
+        def __init__(self) -> None:
+            self.type = None
+            self.data = None
+
+    class FakeCallbackToast:
+        def __init__(self) -> None:
+            self.type = None
+            self.content = None
+
+    class FakeCallbackResponse:
+        def __init__(self) -> None:
+            self.toast = None
+            self.card = None
+
+    def fake_dispatch_sync(context, action: str, *, model: str | None = None, session_id: str | None = None, page: int = 0):
+        return json.dumps({"action": action, "session_id": session_id, "page": page}, ensure_ascii=False)
+
+    def fake_schedule(coro) -> None:
+        scheduled.append(coro)
+        coro.close()
+
+    runner._dispatch_action_sync = fake_dispatch_sync
+    runner._schedule = fake_schedule
+    runner._loop = SimpleNamespace(is_running=lambda: True)
+    runner._runner = SimpleNamespace()
+    runner._callback_card = FakeCallbackCard
+    runner._callback_toast = FakeCallbackToast
+    runner._callback_response = FakeCallbackResponse
+
+    payload_history = SimpleNamespace(
+        event=SimpleNamespace(
+            operator=SimpleNamespace(open_id="ou_card"),
+            context=SimpleNamespace(open_chat_id="oc_card", open_message_id="om_card"),
+            action=SimpleNamespace(value={"action": _CARD_SESSION_HISTORY, "session_id": "session-123", "page": "1"}),
+        )
+    )
+    payload_use = SimpleNamespace(
+        event=SimpleNamespace(
+            operator=SimpleNamespace(open_id="ou_card"),
+            context=SimpleNamespace(open_chat_id="oc_card", open_message_id="om_card"),
+            action=SimpleNamespace(value={"action": _CARD_SESSION_USE, "session_id": "session-123", "page": "1"}),
+        )
+    )
+
+    history_response = runner._handle_card_action_sync(payload_history)
+    use_response = runner._handle_card_action_sync(payload_use)
+
+    assert history_response.toast.content == "已更新"
+    assert use_response.toast.content == "已更新"
+    assert len(scheduled) == 2
+
+
+def test_feishu_live_progress_creates_then_updates_text_messages(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    created: list[str] = []
+
+    async def fake_send_text_once(target, text: str) -> str:
+        created.append(text)
+        return f"om_{len(created)}"
+
+    async def fake_send_text(target, text: str) -> None:
+        created.extend(_chunk for _chunk in [text])
+
+    runner._send_text_message_once = fake_send_text_once
+    runner._send_text_message = fake_send_text
 
     async def scenario() -> None:
         progress = _FeishuLiveProgress(runner, runner._chat_target("oc_chat_1"), "测试请求")
@@ -377,11 +792,127 @@ def test_feishu_live_progress_creates_then_updates_card(make_settings) -> None:
 
     asyncio.run(scenario())
 
-    assert len(sent) == 1
-    assert "测试请求" in sent[0]
-    assert updated
-    assert updated[-1][0] == "om_progress"
-    assert "最终回复" in updated[-1][1]
+    assert len(created) == 2
+    assert created[0].startswith("过程 [已完成]\n测试请求\n• 列出目录")
+    assert created[1] == "最终回复"
+
+
+def test_feishu_live_progress_keeps_single_round_after_reply(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    created: list[str] = []
+
+    async def fake_send_text_once(target, text: str) -> str:
+        created.append(text)
+        return f"om_{len(created)}"
+
+    runner._send_text_message_once = fake_send_text_once
+
+    async def scenario() -> None:
+        progress = _FeishuLiveProgress(runner, runner._chat_target("oc_chat_1"), "测试请求")
+        await progress.start()
+        await progress.log("第一轮过程")
+        await progress.reply("第一轮回复")
+        await progress.log("第二轮过程")
+        await asyncio.sleep(1.3)
+
+    asyncio.run(scenario())
+
+    assert created == ["过程 [进行中]\n测试请求\n• 第一轮过程\n• 第二轮过程"]
+
+
+def test_feishu_live_progress_skips_tiny_reply_preview_until_more_complete(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    created: list[str] = []
+
+    async def fake_send_text_once(target, text: str) -> str:
+        created.append(text)
+        return f"om_{len(created)}"
+
+    runner._send_text_message_once = fake_send_text_once
+
+    async def scenario() -> None:
+        progress = _FeishuLiveProgress(runner, runner._chat_target("oc_chat_1"), "测试请求")
+        await progress.start()
+        await progress.reply("将")
+        await progress.reply("将进行完整测试。")
+
+    asyncio.run(scenario())
+
+    assert created == []
+
+
+def test_feishu_live_progress_sends_reply_in_segments_without_patch(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    created: list[str] = []
+
+    async def fake_send_text_once(target, text: str) -> str:
+        created.append(text)
+        return f"om_{len(created)}"
+
+    async def fake_send_text(target, text: str) -> None:
+        created.extend(text.split("\u0000"))
+
+    runner._send_text_message_once = fake_send_text_once
+    runner._send_text_message = fake_send_text
+
+    async def scenario() -> None:
+        progress = _FeishuLiveProgress(runner, runner._chat_target("oc_chat_1"), "测试请求")
+        await progress.start()
+        await progress.reply("第一段已经完整了。\n第二行也有内容。")
+        await progress.reply("第一段已经完整了。\n第二行也有内容。\n\n第三行继续补充，形成新的分段。")
+        await progress.close(final_text="第一段已经完整了。\n第二行也有内容。\n\n第三行继续补充，形成新的分段。")
+
+    asyncio.run(scenario())
+
+    assert created == ["第一段已经完整了。\n第二行也有内容。\n\n第三行继续补充，形成新的分段。"]
+
+
+def test_feishu_live_progress_sends_incremental_process_messages(make_settings) -> None:
+    settings = make_settings(
+        feishu_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret_test",
+    )
+    runner = FeishuBotRunner(settings)
+    created: list[str] = []
+
+    async def fake_send_text_once(target, text: str) -> str:
+        created.append(text)
+        return f"om_{len(created)}"
+
+    runner._send_text_message_once = fake_send_text_once
+
+    async def scenario() -> None:
+        progress = _FeishuLiveProgress(runner, runner._chat_target("oc_chat_1"), "测试请求")
+        await progress.start()
+        await progress.log("第一步")
+        await progress.log("第二步")
+        await asyncio.sleep(1.3)
+        await progress.log("第三步")
+        await progress.log("第四步")
+        await asyncio.sleep(1.3)
+
+    asyncio.run(scenario())
+
+    assert created == [
+        "过程 [进行中]\n测试请求\n• 第一步\n• 第二步",
+        "过程补充\n• 第三步\n• 第四步",
+    ]
 
 
 def test_feishu_update_card_uses_patch_message_api(make_settings) -> None:

@@ -57,7 +57,7 @@
 3. `tests/test_copilot_sessions.py`：覆盖 `session-state` 目录解析、历史提取、排序、删除和路径型会话 ID 拒绝。
 4. `tests/test_agent.py`：覆盖 Copilot CLI 参数组装、流式事件转译、模型帮助文本解析、`copilot help config` 模型段解析、`.ps1` 帮助命令包装、模型列表回退、CLI 未就绪诊断、非零退出码、空输出、超时提示，以及工具摘要、命令输出、JSONL 提取和若干辅助分支。
 5. `tests/test_telegram_helpers.py`：覆盖主菜单、状态面板、后端诊断面板、模型按钮布局、模型列表去重、文本分块、会话菜单分页、会话详情/历史/删除确认按钮、回调 payload 解析、白名单放行、未授权拒绝、命令注册表、Telegram 命令菜单注册列表和回调 pattern。
-6. `tests/test_feishu_bot.py`：覆盖 Feishu 文本/富文本内容解析、白名单校验、文本事件提交、流式卡片刷新、命令路由和未授权拒绝路径。
+6. `tests/test_feishu_bot.py`：覆盖 Feishu 文本/富文本内容解析、白名单校验、文本事件提交、文本流式进度刷新、命令路由和未授权拒绝路径。
 7. `tests/test_cli_main.py`：覆盖 CLI 入口参数分发、首次运行初始化、Telegram-only / 双通道 / Feishu-only 启动、代理环境变量写入和 `__main__` 入口。
 8. `tests/test_logging_setup.py`：覆盖日志级别解析、根日志处理器替换、文件/控制台级别设置和 `httpx` 日志级别设置。
 9. `tests/conftest.py`：提供测试路径和公共测试夹具。
@@ -76,7 +76,7 @@ pytest
 截至 2026-06-15，项目负责人已在真实 Telegram、真实 Feishu 与真实 Copilot CLI 环境下完成手工联调，验证结论如下：
 1. Bot 启动、命令菜单注册和授权访问控制正常。
 2. 已授权 Telegram Chat 可完成文本对话、流式回复查看和状态查询。
-3. 已授权 Feishu Chat 可完成文本或富文本对话、菜单入口调用、卡片按钮操作与最终结果回传。
+3. 已授权 Feishu Chat 可完成文本或富文本对话、菜单入口调用、卡片按钮操作，以及以文本消息分段形式返回过程和最终结果。
 4. 模型切换、会话管理和本机会话接管等核心链路可正常使用。
 5. 外网消息往返与本地 Copilot CLI 调用协同正常，未发现阻断性问题。
 

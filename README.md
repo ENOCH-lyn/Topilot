@@ -123,7 +123,7 @@ topilot start
 
 Bot 启动时会自动向 Telegram 注册命令菜单；`/start`、`/status`、`/model`、`/sessions`、`/session_current` 等入口也提供内联按钮，常用操作可直接点击完成。
 
-Feishu 当前复用同一套 `TaskRunner`、会话持久化和 Copilot 调用链。收到文本或 `post` 富文本消息后会直接进入当前会话上下文；同时已提供机器人自定义菜单、卡片按钮快捷操作，以及基于交互卡片的进度刷新与结果展示。
+Feishu 当前复用同一套 `TaskRunner`、会话持久化和 Copilot 调用链。收到文本或 `post` 富文本消息后会直接进入当前会话上下文；机器人自定义菜单与快捷操作继续使用卡片，而普通对话过程与最终回复使用文本消息分段发送，以兼顾移动端可读性与飞书接口稳定性。
 
 ## License
 

@@ -103,7 +103,7 @@ Topilot 当前需求拆分为五个核心模块：
 2. 系统应支持为每个 Chat 保存当前模型并在调用时生效。
 3. 系统应支持配置超时时间、推理强度、是否自动附带工作区目录、是否允许全部工具、是否允许访问任意路径。
 4. 系统应支持通过配置显式追加额外允许访问目录，用于在保持默认工作区边界的前提下访问工作区外文件。
-5. 系统应把 `assistant.message_delta` 实时刷新到 Telegram 回复消息中；Feishu 当前版本应使用交互卡片展示进度并原位刷新最终结果。
+5. 系统应把 `assistant.message_delta` 实时刷新到 Telegram 回复消息中；Feishu 当前版本应以普通文本消息分段展示对话过程与最终回复，避免依赖飞书不支持的文本原位刷新能力。
 6. 系统应把 `tool.execution_start`、`tool.execution_complete` 等事件转为中文摘要日志。
 7. 系统应过滤 `session.tools_updated`、`subagent.completed` 等低价值噪声事件。
 8. 当 Copilot CLI 失败、超时、返回空结果或未就绪时，系统应给出明确失败提示。

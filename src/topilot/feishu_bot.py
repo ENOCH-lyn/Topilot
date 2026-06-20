@@ -26,6 +26,10 @@ _MENU_WHOAMI = "topilot.whoami"
 _CARD_STATUS = "topilot.card.status"
 _CARD_MODEL = "topilot.card.model"
 _CARD_SESSIONS = "topilot.card.sessions"
+_CARD_SESSIONS_PAGE = "topilot.card.sessions_page"
+_CARD_SESSION_USE = "topilot.card.session_use"
+_CARD_SESSION_DETAIL = "topilot.card.session_detail"
+_CARD_SESSION_HISTORY = "topilot.card.session_history"
 _CARD_SESSION_CURRENT = "topilot.card.session_current"
 _CARD_SESSION_NEW = "topilot.card.session_new"
 _CARD_WHOAMI = "topilot.card.whoami"
@@ -314,6 +318,7 @@ class FeishuBotRunner:
         self._runner: TaskRunner | None = None
         self._loop = asyncio.new_event_loop()
         self._thread: threading.Thread | None = None
+        self._session_watch_tasks: dict[str, asyncio.Task[None]] = {}
         self._client = None
         self._lark = None
         self._json = None
@@ -589,6 +594,12 @@ class FeishuBotRunner:
         value = getattr(action, "value", None) or {}
         action_name = str(value.get("action") or "")
         model = str(value.get("model") or "")
+        session_id = str(value.get("session_id") or "")
+        page_raw = str(value.get("page") or "").strip()
+        try:
+            page = max(0, int(page_raw)) if page_raw else 0
+        except ValueError:
+            page = 0
         open_id = str(getattr(operator, "open_id", "") or "")
         chat_id = str(getattr(context, "open_chat_id", "") or "")
         message_id = str(getattr(context, "open_message_id", "") or "")
@@ -603,16 +614,20 @@ class FeishuBotRunner:
         if not chat_id or not _feishu_is_allowed(self._settings, chat_id, open_id):
             return self._build_card_action_response("当前用户未授权")
 
+        action_context = _FeishuActionContext(
+            target=self._chat_target(chat_id),
+            open_id=open_id,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
         card_json = self._dispatch_action_sync(
-            _FeishuActionContext(
-                target=self._chat_target(chat_id),
-                open_id=open_id,
-                chat_id=chat_id,
-                message_id=message_id,
-            ),
+            action_context,
             action_name,
             model=model,
+            session_id=session_id,
+            page=page,
         )
+        self._schedule_live_watch_from_callback(action_context, action_name, session_id, page)
         return self._build_card_action_response("已更新", card_json)
 
     def _build_card_action_response(self, toast_text: str, card_json: str | None = None):
@@ -650,11 +665,12 @@ class FeishuBotRunner:
 
     async def _send_text_message(self, target: _FeishuTarget, text: str) -> None:
         for chunk in _chunk_text(text):
+            content = json.dumps({"text": chunk}, ensure_ascii=False)
             body = (
                 self._create_message_request_body.builder()
                 .receive_id(target.receive_id)
                 .msg_type("text")
-                .content(json.dumps({"text": chunk}, ensure_ascii=False))
+                .content(content)
                 .uuid(str(uuid4()))
                 .build()
             )
@@ -666,6 +682,26 @@ class FeishuBotRunner:
             )
             response = await asyncio.to_thread(self._api.im.v1.message.create, request)
             _check_feishu_response(response, f"send_text:{target.receive_id_type}")
+
+    async def _send_text_message_once(self, target: _FeishuTarget, text: str) -> str | None:
+        normalized = _trim_text(text, limit=3000)
+        body = (
+            self._create_message_request_body.builder()
+            .receive_id(target.receive_id)
+            .msg_type("text")
+            .content(json.dumps({"text": normalized}, ensure_ascii=False))
+            .uuid(str(uuid4()))
+            .build()
+        )
+        request = (
+            self._create_message_request.builder()
+            .receive_id_type(target.receive_id_type)
+            .request_body(body)
+            .build()
+        )
+        response = await asyncio.to_thread(self._api.im.v1.message.create, request)
+        _check_feishu_response(response, f"send_text_once:{target.receive_id_type}")
+        return _extract_message_id(response)
 
     async def _send_card_message(self, target: _FeishuTarget, card_json: str) -> str | None:
         body = (
@@ -686,12 +722,12 @@ class FeishuBotRunner:
         _check_feishu_response(response, f"send_card:{target.receive_id_type}")
         return _extract_message_id(response)
 
-    async def _update_card_message(self, message_id: str, card_json: str) -> None:
+    async def _patch_message_content(self, message_id: str, content: str, action: str) -> None:
         if not message_id:
             return
         body = (
             self._patch_message_request_body.builder()
-            .content(card_json)
+            .content(content)
             .build()
         )
         request = (
@@ -701,7 +737,10 @@ class FeishuBotRunner:
             .build()
         )
         response = await asyncio.to_thread(self._api.im.v1.message.patch, request)
-        _check_feishu_response(response, "update_card")
+        _check_feishu_response(response, action)
+
+    async def _update_card_message(self, message_id: str, card_json: str) -> None:
+        await self._patch_message_content(message_id, card_json, "update_card")
 
     async def _send_or_update_card(self, context: _FeishuActionContext, card_json: str) -> str | None:
         if context.message_id:
@@ -710,14 +749,7 @@ class FeishuBotRunner:
         return await self._send_card_message(context.target, card_json)
 
     async def _send_result_message(self, target: _FeishuTarget, text: str) -> None:
-        card_json = _render_card(
-            "Topilot 回复",
-            _trim_text(text, limit=3000),
-            subtitle="Feishu 模式",
-            actions=_base_actions(),
-            template="green",
-        )
-        await self._send_card_message(target, card_json)
+        await self._send_text_message(target, text)
 
     def _build_status_card(self, context: _FeishuActionContext) -> str:
         assert self._runner is not None
@@ -761,17 +793,80 @@ class FeishuBotRunner:
             actions = model_rows + actions
         return _render_card("模型切换", "\n".join(lines), subtitle="点击按钮直接切换", actions=actions, template="indigo")
 
-    def _build_sessions_card(self, context: _FeishuActionContext, prefix: str | None = None) -> str:
+    def _build_sessions_card(self, context: _FeishuActionContext, prefix: str | None = None, page: int = 0) -> str:
         assert self._runner is not None
-        body = self._runner.session_list_text(context.target.session_key)
+        items = self._runner.session_menu_items(context.target.session_key, limit=120)
+        page_items: list[dict] = []
+        if not items:
+            body = "暂无会话。可用 /session_new 新建"
+            total_pages = 1
+            safe_page = 0
+        else:
+            page_size = 10
+            total_pages = max(1, (len(items) + page_size - 1) // page_size)
+            safe_page = min(max(page, 0), total_pages - 1)
+            start = safe_page * page_size
+            page_items = items[start : start + page_size]
+            lines = [
+                f"第 {safe_page + 1}/{total_pages} 页，共 {len(items)} 个会话",
+                "点击下方按钮可直接切换当前页会话",
+                "",
+            ]
+            for item in page_items:
+                sid = str(item.get("id", ""))
+                title = str(item.get("title") or "session")
+                model = str(item.get("model") or "-")
+                source = str(item.get("source") or "saved")
+                running = "🟢" if bool(item.get("running", False)) else "⚪"
+                active = "⭐" if bool(item.get("active", False)) else " "
+                lines.append(f"{running}{active} {sid[:8]} | {title} | {model} | {source}")
+            body = "\n".join(lines)
+
         if prefix:
             body = f"{prefix}\n\n{body}"
-        actions = [
+
+        nav_row: list[dict] = []
+        if safe_page > 0:
+            nav_row.append(_button("上一页", _CARD_SESSIONS_PAGE, page=str(safe_page - 1)))
+        nav_row.append(_button("刷新", _CARD_SESSIONS_PAGE, kind="primary", page=str(safe_page)))
+        if items and safe_page < total_pages - 1:
+            nav_row.append(_button("下一页", _CARD_SESSIONS_PAGE, page=str(safe_page + 1)))
+
+        actions: list[list[dict]] = []
+        if nav_row:
+            actions.append(nav_row)
+        for item in page_items:
+            sid = str(item.get("id", ""))
+            short_sid = sid[:8]
+            title = str(item.get("title") or "session")
+            label_title = title if len(title) <= 10 else title[:10] + "..."
+            active = bool(item.get("active", False))
+            actions.append(
+                [
+                    _button(
+                        f"{'✓ ' if active else ''}切换 {short_sid} {label_title}",
+                        _CARD_SESSION_USE,
+                        kind="primary" if active else "default",
+                        session_id=sid,
+                        page=str(safe_page),
+                    ),
+                    _button(
+                        f"预览 {short_sid}",
+                        _CARD_SESSION_DETAIL,
+                        session_id=sid,
+                        page=str(safe_page),
+                    ),
+                ]
+            )
+        actions.extend(
             [
-                _button("当前会话", _CARD_SESSION_CURRENT, kind="primary"),
-                _button("新建会话", _CARD_SESSION_NEW),
+                [
+                    _button("当前会话", _CARD_SESSION_CURRENT, kind="primary"),
+                    _button("新建会话", _CARD_SESSION_NEW),
+                ]
             ]
-        ] + _base_actions()
+        )
+        actions += _base_actions()
         return _render_card("会话管理", body, subtitle="Feishu 模式", actions=actions, template="turquoise")
 
     def _build_session_current_card(self, context: _FeishuActionContext, prefix: str | None = None) -> str:
@@ -779,7 +874,149 @@ class FeishuBotRunner:
         body = self._runner.session_current_text(context.target.session_key)
         if prefix:
             body = f"{prefix}\n\n{body}"
-        return _render_card("当前会话", body, subtitle="Feishu 模式", actions=_base_actions(), template="turquoise")
+        actions: list[list[dict]] = []
+        session_id = self._current_session_id(context.target.session_key)
+        if session_id:
+            actions.append(
+                [
+                    _button("查看详情", _CARD_SESSION_DETAIL, kind="primary", session_id=session_id),
+                    _button("查看历史", _CARD_SESSION_HISTORY, session_id=session_id),
+                ]
+            )
+        actions += _base_actions()
+        return _render_card("当前会话", body, subtitle="Feishu 模式", actions=actions, template="turquoise")
+
+    def _build_session_detail_card(
+        self,
+        context: _FeishuActionContext,
+        session_id: str,
+        *,
+        prefix: str | None = None,
+        page: int = 0,
+    ) -> str:
+        assert self._runner is not None
+        body = self._runner.session_detail_text(context.target.session_key, session_id)
+        if prefix:
+            body = f"{prefix}\n\n{body}"
+        actions = [
+            [
+                _button("切换到此会话", _CARD_SESSION_USE, kind="primary", session_id=session_id, page=str(page)),
+                _button("查看历史", _CARD_SESSION_HISTORY, session_id=session_id, page=str(page)),
+            ],
+            [
+                _button("刷新详情", _CARD_SESSION_DETAIL, session_id=session_id, page=str(page)),
+                _button("返回列表", _CARD_SESSIONS_PAGE, session_id=session_id, page=str(page)),
+            ],
+        ] + _base_actions()
+        return _render_card("会话详情", body, subtitle=session_id[:12], actions=actions, template="turquoise")
+
+    def _build_session_history_card(
+        self,
+        context: _FeishuActionContext,
+        session_id: str,
+        *,
+        prefix: str | None = None,
+        page: int = 0,
+    ) -> str:
+        assert self._runner is not None
+        body = self._runner.session_history_text(context.target.session_key, session_id)
+        if prefix:
+            body = f"{prefix}\n\n{body}"
+        actions = [
+            [
+                _button("刷新历史", _CARD_SESSION_HISTORY, kind="primary", session_id=session_id, page=str(page)),
+                _button("返回详情", _CARD_SESSION_DETAIL, session_id=session_id, page=str(page)),
+            ],
+            [
+                _button("返回列表", _CARD_SESSIONS_PAGE, session_id=session_id, page=str(page)),
+            ],
+        ] + _base_actions()
+        return _render_card("会话历史", body, subtitle=session_id[:12], actions=actions, template="turquoise")
+
+    async def _stop_session_watch(self, watch_key: str) -> None:
+        task = self._session_watch_tasks.pop(watch_key, None)
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def _stop_all_session_watches(self, session_key: str) -> None:
+        watch_keys = [key for key in self._session_watch_tasks if key.startswith(f"{session_key}:")]
+        for watch_key in watch_keys:
+            await self._stop_session_watch(watch_key)
+
+    def _current_session_id(self, chat_key: str) -> str | None:
+        if self._runner is None:
+            return None
+        for item in self._runner.session_menu_items(chat_key, limit=120):
+            if bool(item.get("active", False)):
+                session_id = str(item.get("id", "")).strip()
+                return session_id or None
+        return None
+
+    def _build_session_use_result_card(
+        self,
+        context: _FeishuActionContext,
+        session_id: str,
+        result: str,
+        *,
+        page: int = 0,
+    ) -> str:
+        if result.startswith("已切换到会话") or result.startswith("已接管会话"):
+            return self._build_session_history_card(context, session_id, prefix=result, page=page)
+        return self._build_sessions_card(context, prefix=result, page=page)
+
+    async def _maybe_start_live_watch(self, context: _FeishuActionContext, session_id: str, page: int = 0) -> None:
+        if self._runner is None or not session_id or not context.message_id:
+            return
+        watch_key = f"{context.target.session_key}:{session_id}"
+        await self._stop_session_watch(watch_key)
+        payload = self._runner.session_live_payload(context.target.session_key, session_id)
+        if bool(payload.get("running", False)):
+            self._session_watch_tasks[watch_key] = asyncio.create_task(self._watch_session_live(context, session_id, page=page))
+
+    def _schedule_live_watch_from_callback(self, context: _FeishuActionContext, action_name: str, session_id: str, page: int) -> None:
+        if action_name not in {_CARD_SESSION_HISTORY, _CARD_SESSION_USE}:
+            return
+        if self._runner is None or not session_id or not context.message_id:
+            return
+        if not self._loop.is_running():
+            return
+        self._schedule(self._maybe_start_live_watch(context, session_id, page=page))
+
+    async def _watch_session_live(self, context: _FeishuActionContext, session_id: str, page: int = 0) -> None:
+        assert self._runner is not None
+        interval = max(1.0, min(self._settings.session_watch_interval_seconds, 15.0))
+        last_signature = ""
+        stable_rounds = 0
+        watch_key = f"{context.target.session_key}:{session_id}"
+        try:
+            for _ in range(150):
+                payload = self._runner.session_live_payload(context.target.session_key, session_id)
+                signature = str(payload.get("signature", ""))
+                running = bool(payload.get("running", False))
+
+                if signature != last_signature:
+                    last_signature = signature
+                    stable_rounds = 0
+                    card_json = self._build_session_history_card(context, session_id, prefix="实时预览中", page=page)
+                    await self._send_or_update_card(context, card_json)
+                else:
+                    stable_rounds += 1
+
+                if not running and stable_rounds >= 3:
+                    final_card = self._build_session_history_card(context, session_id, prefix="会话已停止，自动追踪结束", page=page)
+                    await self._send_or_update_card(context, final_card)
+                    break
+
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._session_watch_tasks.pop(watch_key, None)
 
     def _build_whoami_card(self, context: _FeishuActionContext) -> str:
         body = f"open_id: {context.open_id or '<none>'}"
@@ -794,10 +1031,15 @@ class FeishuBotRunner:
         action: str,
         *,
         model: str | None = None,
+        session_id: str | None = None,
+        page: int = 0,
         return_card: bool = False,
     ) -> str | None:
         if self._runner is None:
             return None
+
+        if action != _CARD_SESSION_HISTORY:
+            await self._stop_all_session_watches(context.target.session_key)
 
         if action in {_MENU_STATUS, _CARD_STATUS}:
             card_json = self._build_status_card(context)
@@ -812,7 +1054,17 @@ class FeishuBotRunner:
             else:
                 card_json = self._build_model_card(context, prefix="模型不可用，未执行切换")
         elif action in {_MENU_SESSIONS, _CARD_SESSIONS}:
-            card_json = self._build_sessions_card(context)
+            card_json = self._build_sessions_card(context, page=0)
+        elif action == _CARD_SESSIONS_PAGE:
+            card_json = self._build_sessions_card(context, page=page)
+        elif action == _CARD_SESSION_USE:
+            result = self._runner.session_use_text(context.target.session_key, session_id or "")
+            card_json = self._build_session_use_result_card(context, session_id or "", result, page=page)
+        elif action == _CARD_SESSION_DETAIL:
+            await self._stop_session_watch(f"{context.target.session_key}:{session_id or ''}")
+            card_json = self._build_session_detail_card(context, session_id or "", page=page)
+        elif action == _CARD_SESSION_HISTORY:
+            card_json = self._build_session_history_card(context, session_id or "", page=page)
         elif action in {_MENU_SESSION_CURRENT, _CARD_SESSION_CURRENT}:
             card_json = self._build_session_current_card(context)
         elif action in {_MENU_SESSION_NEW, _CARD_SESSION_NEW}:
@@ -824,8 +1076,12 @@ class FeishuBotRunner:
             return None
 
         if return_card:
+            if action in {_CARD_SESSION_HISTORY, _CARD_SESSION_USE} and session_id:
+                await self._maybe_start_live_watch(context, session_id, page=page)
             return card_json
         await self._send_or_update_card(context, card_json)
+        if action in {_CARD_SESSION_HISTORY, _CARD_SESSION_USE} and session_id:
+            await self._maybe_start_live_watch(context, session_id, page=page)
         return card_json
 
     def _dispatch_action_sync(
@@ -834,6 +1090,8 @@ class FeishuBotRunner:
         action: str,
         *,
         model: str | None = None,
+        session_id: str | None = None,
+        page: int = 0,
     ) -> str | None:
         if self._runner is None:
             return None
@@ -850,7 +1108,16 @@ class FeishuBotRunner:
                 return self._build_model_card(context, prefix=f"已切换模型: {normalized}")
             return self._build_model_card(context, prefix="模型不可用，未执行切换")
         if action in {_MENU_SESSIONS, _CARD_SESSIONS}:
-            return self._build_sessions_card(context)
+            return self._build_sessions_card(context, page=0)
+        if action == _CARD_SESSIONS_PAGE:
+            return self._build_sessions_card(context, page=page)
+        if action == _CARD_SESSION_USE:
+            result = self._runner.session_use_text(context.target.session_key, session_id or "")
+            return self._build_session_use_result_card(context, session_id or "", result, page=page)
+        if action == _CARD_SESSION_DETAIL:
+            return self._build_session_detail_card(context, session_id or "", page=page)
+        if action == _CARD_SESSION_HISTORY:
+            return self._build_session_history_card(context, session_id or "", page=page)
         if action in {_MENU_SESSION_CURRENT, _CARD_SESSION_CURRENT}:
             return self._build_session_current_card(context)
         if action in {_MENU_SESSION_NEW, _CARD_SESSION_NEW}:
@@ -868,7 +1135,11 @@ class FeishuBotRunner:
             session_prefix = normalized.split(maxsplit=1)[1].strip()
             result = self._runner.session_use_text(target.session_key, session_prefix)
             context = _FeishuActionContext(target=target, open_id=open_id, chat_id=chat_id)
-            card_json = self._build_session_current_card(context, prefix=result)
+            session_id = self._current_session_id(target.session_key)
+            if session_id and (result.startswith("已切换到会话") or result.startswith("已接管会话")):
+                card_json = self._build_session_history_card(context, session_id, prefix=result)
+            else:
+                card_json = self._build_session_current_card(context, prefix=result)
             await self._send_or_update_card(context, card_json)
             return True
 
@@ -886,20 +1157,15 @@ class _FeishuLiveProgress:
         self._bot = bot
         self._target = target
         self._title = title
-        self._message_id: str | None = None
         self._progress_lines: list[str] = []
         self._reply_buffer = ""
-        self._reply_started = False
+        self._progress_flush_task: asyncio.Task[None] | None = None
+        self._reply_flush_task: asyncio.Task[None] | None = None
         self._closed = False
-        self._last_render = ""
-        self._last_flush_at = 0.0
-        self._flush_task: asyncio.Task[None] | None = None
+        self._progress_sent_count = 0
+        self._reply_sent = False
 
     async def start(self) -> "_FeishuLiveProgress":
-        card_json = self._render_card("进行中")
-        self._message_id = await self._bot._send_card_message(self._target, card_json)
-        self._last_render = card_json
-        self._last_flush_at = time.monotonic()
         return self
 
     async def log(self, text: str) -> None:
@@ -908,18 +1174,14 @@ class _FeishuLiveProgress:
             return
         if self._should_skip_log(normalized):
             return
-        if self._reply_started:
-            await self._roll_to_next_round()
         self._merge_progress_line(normalized)
-        await self._schedule_flush()
+        self._ensure_progress_flush_task()
 
     async def reply(self, text: str) -> None:
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
         if normalized == "" or self._closed:
             return
-        self._reply_started = True
         self._append_reply_chunk(normalized)
-        await self._schedule_flush()
 
     async def close(self, final_text: str | None = None, failed: bool = False) -> None:
         if self._closed:
@@ -931,51 +1193,68 @@ class _FeishuLiveProgress:
                 self._reply_buffer = final_clean
         if failed:
             self._progress_lines.append("执行失败")
-        await self._flush(force=True)
-        await self._cancel_task(self._flush_task)
+        await self._flush_progress(force=True)
+        await self._flush_reply(force=True)
+        await self._cancel_task(self._progress_flush_task)
 
-    async def _roll_to_next_round(self) -> None:
-        self._progress_lines = []
-        self._reply_buffer = ""
-        self._reply_started = False
-        await self._flush(force=True)
+    def _render_progress_text(self) -> str:
+        state = "已完成" if self._closed else "进行中"
+        lines = self._progress_lines[:12] or ["处理中..."]
+        rendered_lines: list[str] = []
+        for line in lines:
+            parts = [part for part in line.splitlines() if part.strip()]
+            if not parts:
+                continue
+            rendered_lines.append(f"• {parts[0]}")
+            rendered_lines.extend(f"  {part}" for part in parts[1:])
+        body = "\n".join(rendered_lines) if rendered_lines else "• 处理中..."
+        title = f"过程 [{state}]"
+        if self._title:
+            title = f"{title}\n{self._title}"
+        return _trim_text(f"{title}\n{body}", limit=3000)
 
-    def _render_card(self, state: str) -> str:
-        progress_lines = self._progress_lines[-10:] or ["处理中..."]
-        lines = [f"状态: {state}", "", "过程:"]
-        lines.extend(f"- {line}" for line in progress_lines)
-        reply_text = self._reply_text()
-        if reply_text:
-            lines.extend(["", "回复:", _trim_text(reply_text, limit=2800)])
-        return _render_card(
-            self._title,
-            "\n".join(lines),
-            subtitle="Feishu 流式进度",
-            actions=_base_actions(),
-            template="blue",
-        )
+    def _ensure_progress_flush_task(self) -> None:
+        if self._progress_flush_task is None or self._progress_flush_task.done():
+            self._progress_flush_task = asyncio.create_task(self._delayed_flush_progress())
 
-    async def _schedule_flush(self) -> None:
-        if self._can_flush_now():
-            await self._flush(force=True)
+    async def _delayed_flush_progress(self) -> None:
+        await asyncio.sleep(1.2)
+        await self._flush_progress(force=True)
+
+    async def _flush_progress(self, force: bool = False) -> None:
+        pending_lines = self._progress_lines[self._progress_sent_count :]
+        if not pending_lines:
             return
-        if self._flush_task is None or self._flush_task.done():
-            self._flush_task = asyncio.create_task(self._delayed_flush())
-
-    async def _delayed_flush(self) -> None:
-        await asyncio.sleep(0.9)
-        await self._flush(force=True)
-
-    async def _flush(self, force: bool = False) -> None:
-        card_json = self._render_card("已完成" if self._closed else "进行中")
-        if card_json == self._last_render and not force:
+        if not force and self._progress_sent_count > 0 and len(pending_lines) < 2:
             return
-        self._last_render = card_json
-        self._last_flush_at = time.monotonic()
-        if self._message_id:
-            await self._bot._update_card_message(self._message_id, card_json)
+        if self._progress_sent_count == 0:
+            lines = self._progress_lines[:12]
+            rendered = self._render_progress_text()
         else:
-            self._message_id = await self._bot._send_card_message(self._target, card_json)
+            rendered_lines: list[str] = []
+            for line in pending_lines[:10]:
+                parts = [part for part in line.splitlines() if part.strip()]
+                if not parts:
+                    continue
+                rendered_lines.append(f"• {parts[0]}")
+                rendered_lines.extend(f"  {part}" for part in parts[1:])
+            if not rendered_lines:
+                return
+            header = "过程补充"
+            if self._closed:
+                header = "过程结束"
+            rendered = _trim_text(f"{header}\n" + "\n".join(rendered_lines), limit=3000)
+        await self._bot._send_text_message_once(self._target, rendered)
+        self._progress_sent_count = len(self._progress_lines)
+
+    async def _flush_reply(self, force: bool = False) -> None:
+        if not force or self._reply_sent:
+            return
+        reply_text = self._reply_text()
+        if not reply_text.strip():
+            return
+        await self._bot._send_text_message(self._target, reply_text)
+        self._reply_sent = True
 
     def _merge_progress_line(self, line: str) -> None:
         if not self._progress_lines:
@@ -1037,14 +1316,13 @@ class _FeishuLiveProgress:
         lowered = line.lower()
         noisy = (
             "[session.tools_updated]",
+            "[session.mcp_server_status_changed]",
             "[user.message]",
             "report_intent",
             "[subagent.completed]",
+            "获取 copilot cli 文档",
         )
         return any(flag in lowered for flag in noisy)
-
-    def _can_flush_now(self) -> bool:
-        return (time.monotonic() - self._last_flush_at) >= 0.9
 
     async def _cancel_task(self, task: asyncio.Task[None] | None) -> None:
         if task is None or task.done():

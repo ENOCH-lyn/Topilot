@@ -349,17 +349,25 @@ class TaskRunner:
 
     def session_list_text(self, chat_id: ChatKey) -> str:
         """返回会话列表文本，按最近使用时间排序，标记当前会话"""
-        sessions = self._sessions.list_sessions(chat_id, limit=12)
+        sessions = self.session_menu_items(chat_id, limit=120)
         if not sessions:
             return "暂无会话。可用 /session_new 新建"
-        active = self._sessions.active_session(chat_id)
+        shown = sessions[:20]
         lines = []
-        for item in sessions:
+        for item in shown:
             sid = str(item.get("id", ""))
             title = str(item.get("title", "session"))
-            mark = "*" if sid == active else " "
-            lines.append(f"{mark} {sid[:8]} | {title} | {item.get('last_used_at', '')}")
-        return "Copilot 会话列表(*为当前):\n" + "\n".join(lines)
+            running = "🟢" if bool(item.get("running", False)) else "⚪"
+            mark = "⭐" if bool(item.get("active", False)) else " "
+            model = str(item.get("model") or "-")
+            source = str(item.get("source") or "saved")
+            stamp = str(item.get("last_event_at") or item.get("last_used_at") or "-")
+            lines.append(f"{running}{mark} {sid[:8]} | {title} | {model} | {source} | {stamp}")
+
+        header = f"Copilot 会话列表(⭐为当前，共 {len(sessions)} 个):"
+        if len(shown) < len(sessions):
+            header += f"\n仅显示前 {len(shown)} 个，更多会话请在支持分页的入口中查看。"
+        return header + "\n" + "\n".join(lines)
 
     def session_new_text(self, chat_id: ChatKey, title: str | None = None) -> str:
         """新建会话并切换"""

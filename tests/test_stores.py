@@ -486,6 +486,8 @@ def test_task_runner_session_text_helpers_cover_empty_list_new_session_and_store
         return None
 
     runner = TaskRunner(settings, _send_message)
+    runner._inspector.list_sessions = lambda limit=20: []
+    runner._inspector.get_session = lambda sid: None
 
     assert runner.session_list_text(100) == "暂无会话。可用 /session_new 新建"
     assert runner.session_use_text(100, "   ") == "未找到会话:    "
@@ -501,9 +503,52 @@ def test_task_runner_session_text_helpers_cover_empty_list_new_session_and_store
         source="saved",
         running=False,
     )
-    runner._inspector.get_session = lambda sid: None
-
     assert created_text.startswith("已新建并切换会话: ")
     assert "manual" in runner.session_list_text(100)
     assert "当前激活: 是" in runner.session_detail_text(100, session_id)
     assert runner.takeover_session(100, "missing") == "未找到该会话"
+
+
+def test_task_runner_session_list_text_merges_discovered_sessions_and_shows_total(make_settings) -> None:
+    settings = make_settings()
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    runner = TaskRunner(settings, _send_message)
+    runner._sessions.create_session(100, title="manual")
+    runner._inspector.list_sessions = lambda limit=20: [
+        CopilotSessionInfo(
+            session_id=f"live-session-{index:02d}",
+            cwd="C:/live",
+            model="gpt-5-mini",
+            summary=f"live-{index}",
+            running=index % 2 == 0,
+            last_event_at=f"2026-05-05T10:{index:02d}:00Z",
+            history_lines=[],
+        )
+        for index in range(22)
+    ]
+    runner._inspector.get_session = lambda sid: next(
+        (
+            CopilotSessionInfo(
+                session_id=f"live-session-{index:02d}",
+                cwd="C:/live",
+                model="gpt-5-mini",
+                summary=f"live-{index}",
+                running=index % 2 == 0,
+                last_event_at=f"2026-05-05T10:{index:02d}:00Z",
+                history_lines=[],
+            )
+            for index in range(22)
+            if f"live-session-{index:02d}" == sid
+        ),
+        None,
+    )
+
+    text = runner.session_list_text(100)
+
+    assert "共 23 个" in text
+    assert "仅显示前 20 个" in text
+    assert "live-21" in text
+    assert "live-0" not in text
