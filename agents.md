@@ -1,7 +1,7 @@
 # Topilot AI 协作规范
 
 ## 1. 项目基础背景
-Topilot 是一个将本地 GitHub Copilot CLI 能力桥接到 Telegram Bot 的轻量级个人 AI 工具项目，开发目标是让用户在离开电脑后，仍能通过手机继续使用、查看和接管本机 Copilot 会话。
+Topilot 是一个将本地 GitHub Copilot CLI 能力桥接到 Telegram Bot 与 Feishu Bot 的轻量级个人 AI 工具项目，开发目标是让用户在离开电脑后，仍能通过手机继续使用、查看和接管本机 Copilot 会话。
 
 ## 2. 仓库实际目录结构
 以下目录结构以当前仓库实际内容为准，AI 在修改代码或文档前必须先确认目标文件所在位置，禁止凭经验臆测目录。
@@ -14,6 +14,8 @@ copilot-in-telegram/
 ├─ assets/                        # README/PPT 使用的图片资源
 ├─ data/                          # 本地运行过程中使用的项目数据目录
 ├─ doc/                           # 课程验收正式文档目录
+│  ├─ LONG_TASK_BLOCKERS.md       # 长任务阻塞记录
+│  ├─ LONG_TASK_STATE.md          # 长任务状态记录
 │  ├─ 需求/                       # PRD、需求规格说明书
 │  ├─ 架构/                       # ADR、架构决策文档
 │  ├─ 计划/                       # 总计划、阶段计划、模块执行计划
@@ -23,19 +25,24 @@ copilot-in-telegram/
 │  ├─ 测试/                       # 测试方案、测试用例、测试结果文档
 │  └─ 验收/                       # 模块验收报告
 ├─ logs/                          # 本地运行日志目录
+├─ scripts/                       # 守护与运维辅助脚本
 ├─ src/
 │  └─ topilot/
+│     ├─ __init__.py
 │     ├─ cli/                     # CLI 入口与子命令
+│     │  ├─ __init__.py
+│     │  └─ __main__.py
 │     ├─ agent.py                 # Copilot CLI 调用、JSON 流解析、工具摘要
 │     ├─ config.py                # JSON 配置读写与配置校验
 │     ├─ conversation_store.py    # chats.json 对话历史持久化
 │     ├─ copilot_sessions.py      # 本地 session-state 扫描、接管、删除
+│     ├─ feishu_bot.py            # Feishu Bot 接入层、菜单、卡片与文本回复
 │     ├─ logging_setup.py         # 日志初始化与级别控制
 │     ├─ main.py                  # 兼容入口
 │     ├─ models.py                # 基础数据模型
 │     ├─ paths.py                 # 应用目录结构定义
 │     ├─ session_store.py         # sessions.json 会话与模型持久化
-│     ├─ task_runner.py           # Telegram 请求调度与业务编排
+│     ├─ task_runner.py           # 跨平台请求调度与业务编排
 │     └─ telegram_bot.py          # Telegram Bot 接入层、命令、按钮、流式展示
 ├─ tests/                         # pytest 测试目录，包含配置、存储、会话扫描、事件解析等基础测试
 ├─ .env.example                   # 旧版环境变量配置提示（历史遗留文件，不作为运行配置来源）
@@ -47,7 +54,7 @@ copilot-in-telegram/
 ├─ designer.md                    # Telegram 交互风格约束
 ├─ LICENSE
 ├─ pyproject.toml                 # Python 包与依赖声明
-├─ README-en.md
+├─ pytest.ini
 ├─ README.md
 └─ Tips.md                        # 本地个人记录，不作为正式文档依据
 ```
@@ -68,9 +75,9 @@ copilot-in-telegram/
 
 ### 3.3 输出与编码规范
 1. 默认输出语言为中文，文档表达要求专业、准确、可验收。
-2. Python 代码基于 3.12+，保持类型标注、模块拆分和当前项目风格一致。
+2. Python 代码基于 3.11+，保持类型标注、模块拆分和当前项目风格一致。
 3. 新增功能说明时必须同时写清输入、输出、异常路径和验收口径。
-4. 任何与 Telegram 交互相关的说明必须使用项目已实现的命令、按钮和文案语义，不得虚构页面。
+4. 任何与 Telegram / Feishu 交互相关的说明都必须使用项目已实现的命令、按钮、卡片和文案语义，不得虚构页面。
 
 ### 3.4 文档同步规则
 1. 需求变化：更新 `doc/需求/` 与 `doc/计划/`。
@@ -105,11 +112,11 @@ copilot-in-telegram/
 2. Telegram 接入固定使用 `python-telegram-bot` 22.x。
 3. HTTP 相关依赖使用 `httpx`。
 4. 当前版本不引入数据库，持久化方式固定为 JSON 文件。
-5. 当前运行形态为单进程长轮询 Bot，不设计为多实例分布式系统。
+5. 当前运行形态为单进程常驻 Bot，其中 Telegram 使用长轮询，Feishu 使用长连接后台线程，不设计为多实例分布式系统。
 
 ### 5.2 安全约束
 1. Bot Token、代理地址、工作区路径不得硬编码进源码。
-2. 访问控制必须以 `telegram.allowed_chat_ids` 为准，`/whoami` 作为例外诊断命令保留开放。
+2. 访问控制必须分别以 `telegram.allowed_chat_ids`、`feishu.allowed_chat_ids` 和 `feishu.allowed_open_ids` 为准；Telegram `/whoami` 作为例外诊断命令保留开放。
 3. 会话接管仅允许读取本机 `~/.copilot/session-state`，不得扩展为任意系统目录扫描。
 4. 项目定位为个人可信环境工具，不宣称企业级隔离能力。
 

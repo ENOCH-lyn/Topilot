@@ -147,13 +147,15 @@
 | `/model` | 无 | 模型选择键盘 | 受白名单控制 | 无可用模型 / 未授权 |
 | `/status` | 无 | 后端状态、当前会话、来源、状态、模型与工作区摘要，并提供后端诊断按钮 | 受白名单控制 | 未授权提示 |
 
-### 3.3 Feishu 事件接口
+### 3.3 Feishu 事件与回调接口
 
-| 事件 | 输入 | 输出 | 权限 | 失败反馈 |
+| 事件/回调 | 输入 | 输出 | 权限 | 失败反馈 |
 | --- | --- | --- | --- | --- |
 | `im.message.receive_v1` | 文本消息或 `post` 富文本消息事件 | 转入 `TaskRunner.submit()`、命令路由或返回拒绝提示 | 受白名单控制 | 未授权提示 / 无法提取文本时忽略 |
+| `application.bot.menu_v6` | 机器人自定义菜单事件 | 返回状态、模型、会话、当前会话、新建会话或身份信息卡片 | 受白名单控制 | 未授权提示 |
+| 卡片动作回调 | 模型、会话、页码等卡片 payload | 原位刷新卡片内容，并在需要时启动实时预览 | 受白名单控制 | 未授权提示 / 回调 toast 提示 |
 
-### 3.3 回调接口
+### 3.4 Telegram 回调接口
 
 | 回调前缀 | 作用 | 典型值 |
 | --- | --- | --- |
@@ -340,14 +342,14 @@
 8. `shis:` 回调用 `_render_session_history()` 生成“刷新历史、返回详情、返回列表、主菜单”按钮。
 
 ### 5.8 Feishu 消息处理算法
-1. Feishu 长连接客户端监听 `im.message.receive_v1`。
-2. 处理 `message_type=text` 与 `message_type=post` 的事件；无法提取有效文本时忽略。
-3. 从事件中提取 `chat_id`、`message_id`、`sender.sender_id.open_id` 和消息文本；`post` 富文本会按段落与标题归一化为普通文本。
-4. 按 `feishu.allowed_chat_ids`、`feishu.allowed_open_ids` 执行授权校验；未授权时回复固定文本提示。
-5. 将会话键转换为 `feishu:<chat_id>` 后交给 `TaskRunner.submit()`，与 Telegram 共用会话存储和 Copilot 调用链。
-6. 普通结果通过交互卡片发送，长耗时请求优先创建同一条进度卡片并持续刷新，最终在原消息位展示结果与快捷按钮。
-9. `sdel:` 回调用 `_render_session_delete_confirm()` 生成“确认删除、取消、返回列表、主菜单”按钮，确保删除操作必须二次确认。
-10. `model_sel:`、`nav:`、`sopen:`、`suse:`、`shis:`、`sdel:`、`sdelok:` 的 payload 均通过 `_callback_payload()` 提取并去除首尾空白。
+1. Feishu 长连接客户端同时监听 `im.message.receive_v1`、机器人自定义菜单事件和卡片动作回调。
+2. 对 `message_type=text` 与 `message_type=post` 的事件提取 `chat_id`、`message_id`、`open_id` 和消息文本；`post` 富文本按标题、段落和行内元素归一化为普通文本。
+3. 按 `feishu.allowed_chat_ids`、`feishu.allowed_open_ids` 执行授权校验；未授权请求返回固定提示，不进入业务执行。
+4. 文本命令 `/status`、`/model`、`/sessions`、`/session_current`、`/session_new`、`/session_use <prefix>` 和 `/whoami` 先走命令路由；普通文本再交给 `TaskRunner.submit()`。
+5. 状态、模型、会话列表、当前会话、会话详情、会话历史和身份信息等结构化结果使用 legacy interactive card 发送；机器人自定义菜单和卡片按钮共用同一套动作分发逻辑。
+6. 普通 Copilot 对话的过程日志与最终回复由 `_FeishuLiveProgress` 以普通文本消息分段发送，不依赖飞书文本原位刷新能力。
+7. 会话切换结果或历史查看结果如指向运行中的本机会话，可启动实时追踪任务，并通过 `patch message` 持续刷新同一张历史卡片。
+8. 模型、会话和分页等卡片 payload 统一解析 `model`、`session_id`、`page` 字段；非法页码自动回退到第 0 页。
 
 ## 6. 异常处理方案
 

@@ -1,7 +1,7 @@
 # Topilot 测试方案与测试用例
 
 ## 1. 文档说明
-本文档用于说明 Topilot 当前版本的测试范围、测试环境、测试方法、测试用例和结果记录口径。仓库中已提交基础 `pytest` 自动化测试，覆盖配置解析、交互式初始化、启动诊断、会话存储容错、本机会话扫描边界、Copilot 事件解析、Copilot CLI 异常提示、Telegram 白名单、Feishu 事件接入、命令注册、模型菜单和会话回调渲染逻辑。与此同时，项目负责人已完成真实 Telegram 外网联调、真实 Feishu 外网联调与真实 Copilot CLI 集成联调。
+本文档用于说明 Topilot 当前版本的测试范围、测试环境、测试方法、测试用例和结果记录口径。仓库中已提交基础 `pytest` 自动化测试，覆盖配置解析、交互式初始化、启动诊断、会话存储容错、本机会话扫描边界、Copilot 事件解析、Copilot CLI 异常提示、Telegram 白名单、Feishu 文本/富文本事件、机器人菜单、卡片回调、命令注册、模型菜单和会话回调渲染逻辑。与此同时，项目负责人已完成真实 Telegram 外网联调、真实 Feishu 外网联调与真实 Copilot CLI 集成联调。
 
 ## 2. 测试目标
 1. 验证配置、启动、诊断链路是否可用。
@@ -57,19 +57,19 @@
 3. `tests/test_copilot_sessions.py`：覆盖 `session-state` 目录解析、历史提取、排序、删除和路径型会话 ID 拒绝。
 4. `tests/test_agent.py`：覆盖 Copilot CLI 参数组装、流式事件转译、模型帮助文本解析、`copilot help config` 模型段解析、`.ps1` 帮助命令包装、模型列表回退、CLI 未就绪诊断、非零退出码、空输出、超时提示，以及工具摘要、命令输出、JSONL 提取和若干辅助分支。
 5. `tests/test_telegram_helpers.py`：覆盖主菜单、状态面板、后端诊断面板、模型按钮布局、模型列表去重、文本分块、会话菜单分页、会话详情/历史/删除确认按钮、回调 payload 解析、白名单放行、未授权拒绝、命令注册表、Telegram 命令菜单注册列表和回调 pattern。
-6. `tests/test_feishu_bot.py`：覆盖 Feishu 文本/富文本内容解析、白名单校验、文本事件提交、文本流式进度刷新、命令路由和未授权拒绝路径。
+6. `tests/test_feishu_bot.py`：覆盖 Feishu 文本/富文本内容解析、白名单校验、文本事件提交、文本分段进度发送、机器人菜单事件、卡片动作回调、模型切换、会话列表分页、会话详情/历史预览、运行中会话实时刷新和卡片 patch 更新。
 7. `tests/test_cli_main.py`：覆盖 CLI 入口参数分发、首次运行初始化、Telegram-only / 双通道 / Feishu-only 启动、代理环境变量写入和 `__main__` 入口。
 8. `tests/test_logging_setup.py`：覆盖日志级别解析、根日志处理器替换、文件/控制台级别设置和 `httpx` 日志级别设置。
 9. `tests/conftest.py`：提供测试路径和公共测试夹具。
 
 本地执行命令：
 ```powershell
-pytest
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 本次实际结果：
 ```text
-43 passed（本轮新增与回归子集）
+118 passed in 10.10s
 ```
 
 ## 5.2 手工联调结果
@@ -170,4 +170,4 @@ pytest
 1. 每次执行测试时，需记录执行日期、执行环境、执行人、用例编号、是否通过、失败原因。
 2. 对手工验证项，应附 Telegram / Feishu 截图或日志片段作为证据。
 3. 对自动化测试项，应保存命令输出和失败堆栈。
-4. 2026-06-15 的本轮回归结果为 `.\.venv\Scripts\python.exe -m pytest tests\test_config.py tests\test_cli_main.py tests\test_feishu_bot.py tests\test_stores.py -q`，43 项全部通过，可作为本轮 Feishu 接入与配置扩展的测试记录。
+4. 2026-06-20 的完整回归结果为 `.\.venv\Scripts\python.exe -m pytest -q`，118 项全部通过，可作为当前提交版的自动化测试基线。
