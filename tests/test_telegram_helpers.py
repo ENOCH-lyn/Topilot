@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from telegram.error import NetworkError
 from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler
 
 from topilot.telegram_bot import (
@@ -366,3 +367,26 @@ def test_build_application_sets_get_updates_timeouts(make_settings) -> None:
     assert get_updates_request._client.timeout.connect == 10.0
     assert get_updates_request._client.timeout.write == 10.0
     assert get_updates_request._client.timeout.pool == 10.0
+
+
+def test_telegram_polling_network_error_requests_application_restart(make_settings, monkeypatch) -> None:
+    from topilot.telegram_bot import build_application
+
+    class FakeContext:
+        def __init__(self, error: Exception, application) -> None:
+            self.error = error
+            self.application = application
+
+    app = build_application(make_settings())
+    error_handler = next(iter(app.error_handlers))
+    stopped: list[bool] = []
+
+    def stop_running(self) -> None:
+        stopped.append(True)
+
+    monkeypatch.setattr(type(app), "stop_running", stop_running)
+
+    asyncio.run(error_handler(None, FakeContext(NetworkError("proxy down"), app)))
+
+    assert app.bot_data["telegram_restart_requested"] is True
+    assert stopped == [True]

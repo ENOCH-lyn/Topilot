@@ -19,6 +19,7 @@
 1. CLI 入口不直接处理业务逻辑，只做环境准备和流程分发。
 2. 配置文件固定存放在 `~/.topilot/config.json`，避免出现多套配置目录。
 3. `doctor` 不启动 Telegram 或 Feishu，也不调用真实 Copilot 对话，只执行配置、目录、命令可执行性和问题清单诊断，用于启动前检查。
+4. `start` 在 Telegram 长轮询返回后检查 `telegram_restart_requested` 标记；若该标记存在，则等待 2 秒后重建 Telegram Application。
 
 ### 2.2 配置与路径模块
 
@@ -56,6 +57,7 @@
 4. 模型菜单、会话详情、会话历史、删除确认页均使用独立渲染函数生成文本和按钮，避免回调分支中散落重复 UI 结构。
 5. 回调 payload 和页码统一通过 `_callback_payload()`、`_callback_page()` 解析，非法页码或负数统一回到第 0 页。
 6. Feishu 侧采用 `lark-oapi` 长连接客户端，通过 `im.message.receive_v1`、机器人菜单事件和卡片动作回调接入消息与交互；业务层直接复用 `TaskRunner`、会话存储和模型切换链路，其中菜单和快捷入口使用交互卡片，普通对话过程与结果使用文本消息分段发送链路。
+7. Telegram 侧对普通 API 请求和 `getUpdates` 分别设置超时；当轮询层出现网络异常且没有具体 Update 上下文时，错误处理器会标记需要重建并停止当前 Application。
 
 ### 2.4 任务编排模块
 
@@ -365,6 +367,7 @@
 | Copilot CLI 返回空输出 | 返回“stdout/stderr 均为空”的明确提示，并提示检查登录、命令路径和 `--output-format json` 支持 |
 | Telegram HTML 解析失败 | 自动回退为纯文本过程消息 |
 | Telegram 回调页码非法 | 回退到第 0 页，不抛出异常 |
+| Telegram 长轮询网络异常 | 标记 `telegram_restart_requested`，停止当前 Application，并由 CLI 启动层延迟重建 |
 | 模型列表包含空值或重复值 | 渲染前去重清理，合法性校验使用同一清理结果 |
 | 会话目录不存在 | 返回“会话不存在或已被删除” |
 | 会话 ID 是绝对路径或包含路径分隔符 | 拒绝读取或删除，返回未找到 / 无法删除 |

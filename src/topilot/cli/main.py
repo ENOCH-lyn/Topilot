@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import time
 from pathlib import Path
@@ -17,6 +18,9 @@ from topilot.feishu_bot import start_feishu_bot
 from topilot.logging_setup import configure_logging
 from topilot.paths import build_app_paths, ensure_app_dirs
 from topilot.telegram_bot import build_application
+
+
+logger = logging.getLogger(__name__)
 
 
 def _prompt(prompt: str, default: str | None = None, required: bool = False) -> str:
@@ -150,14 +154,20 @@ def run_start() -> int:
         feishu_runner = start_feishu_bot(settings)
 
     if settings.telegram_enabled:
-        application = build_application(settings)
-        application.run_polling(
-            poll_interval=0.0,
-            timeout=30,
-            bootstrap_retries=-1,
-            drop_pending_updates=False,
-            close_loop=True,
-        )
+        while True:
+            application = build_application(settings)
+            application.run_polling(
+                poll_interval=0.0,
+                timeout=30,
+                bootstrap_retries=-1,
+                drop_pending_updates=False,
+                close_loop=False,
+            )
+            bot_data = getattr(application, "bot_data", {})
+            if not bot_data.get("telegram_restart_requested"):
+                break
+            logger.warning("Telegram polling 已停止，2 秒后重建应用")
+            time.sleep(2.0)
         return 0
 
     if feishu_runner is not None:

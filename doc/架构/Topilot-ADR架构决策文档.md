@@ -100,6 +100,7 @@ telegram_bot.py / feishu_bot.py
 1. `application.run_polling()` 足以满足 Telegram 个人场景。
 2. Feishu 长连接不需要公网回调地址，适合本地常驻进程。
 3. 单进程更易与本地 Copilot CLI 和文件存储协同。
+4. Telegram 轮询层可在网络异常后由启动层重建 Application，不需要额外引入进程管理服务。
 
 ### 5.5 优缺点
 优点：
@@ -109,7 +110,7 @@ telegram_bot.py / feishu_bot.py
 
 缺点：
 1. 不适合高并发和多实例扩展。
-2. 可用性依赖单进程运行状态。
+2. 可用性依赖单进程运行状态，适合配合本机守护脚本使用。
 
 ## 6. ADR-004：采用 JSON 文件存储，而不是数据库
 

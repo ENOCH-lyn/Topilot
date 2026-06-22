@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from html import escape
 
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
-from telegram.error import BadRequest
+from telegram.error import BadRequest, NetworkError
 from telegram.ext import Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from topilot.config import Settings
@@ -485,6 +485,12 @@ def build_application(settings: Settings) -> Application:
     async def application_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         error = context.error
         update_id, chat_id, message_id, text_preview = _update_log_context(update)
+        if update is None and isinstance(error, NetworkError):
+            if application is not None:
+                application.bot_data["telegram_restart_requested"] = True
+                logger.warning("Telegram polling 网络异常，准备重建应用: %s", error)
+                application.stop_running()
+            return
         if error is None:
             logger.error(
                 "Telegram 更新处理失败 update_id=%s chat_id=%s message_id=%s payload=%s",

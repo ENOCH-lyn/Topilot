@@ -66,11 +66,35 @@ def test_run_start_sets_proxy_and_runs_application(make_settings, monkeypatch: p
         "timeout": 30,
         "bootstrap_retries": -1,
         "drop_pending_updates": False,
-        "close_loop": True,
+        "close_loop": False,
     }
     assert os.environ["HTTP_PROXY"] == settings.telegram_proxy_url
     assert os.environ["HTTPS_PROXY"] == settings.telegram_proxy_url
     assert os.environ["ALL_PROXY"] == settings.telegram_proxy_url
+
+
+def test_run_start_rebuilds_telegram_application_when_restart_is_requested(make_settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = make_settings()
+    calls: list[str] = []
+
+    class FakeApplication:
+        def __init__(self, restart_requested: bool) -> None:
+            self.bot_data = {"telegram_restart_requested": restart_requested}
+
+        def run_polling(self, **kwargs) -> None:
+            calls.append("run")
+            calls.append(f"close_loop:{kwargs['close_loop']}")
+
+    applications = iter([FakeApplication(True), FakeApplication(False)])
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "configure_logging", lambda current: calls.append("logging"))
+    monkeypatch.setattr(cli_main, "start_feishu_bot", lambda current: calls.append("feishu"))
+    monkeypatch.setattr(cli_main, "build_application", lambda current: next(applications))
+    monkeypatch.setattr(cli_main.time, "sleep", lambda seconds: calls.append(f"sleep:{seconds}"))
+
+    assert cli_main.run_start() == 0
+    assert calls == ["logging", "run", "close_loop:False", "sleep:2.0", "run", "close_loop:False"]
 
 
 def test_run_start_launches_feishu_before_telegram_when_both_enabled(make_settings, monkeypatch: pytest.MonkeyPatch) -> None:

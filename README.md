@@ -109,6 +109,7 @@ topilot start
 
 当 `telegram.enabled=false` 且 `feishu.enabled=true` 时，Topilot 将以 Feishu-only 模式常驻运行。
 当两者都启用时，Feishu 长连接会在后台线程启动，Telegram 轮询保持主线程运行。
+Telegram 长轮询遇到可恢复的网络异常时，启动层会记录日志并重建 Telegram Application，减少代理短暂中断后进程仍在但不再消费更新的情况。
 
 ## Bot 可用命令
 

@@ -1,7 +1,7 @@
 # Topilot 测试方案与测试用例
 
 ## 1. 文档说明
-本文档用于说明 Topilot 当前版本的测试范围、测试环境、测试方法、测试用例和结果记录口径。仓库中已提交基础 `pytest` 自动化测试，覆盖配置解析、交互式初始化、启动诊断、会话存储容错、本机会话扫描边界、Copilot 事件解析、Copilot CLI 异常提示、Telegram 白名单、Feishu 文本/富文本事件、机器人菜单、卡片回调、命令注册、模型菜单和会话回调渲染逻辑。与此同时，项目负责人已完成真实 Telegram 外网联调、真实 Feishu 外网联调与真实 Copilot CLI 集成联调。
+本文档用于说明 Topilot 当前版本的测试范围、测试环境、测试方法、测试用例和结果记录口径。仓库中已提交基础 `pytest` 自动化测试，覆盖配置解析、交互式初始化、启动诊断、会话存储容错、本机会话扫描边界、Copilot 事件解析、Copilot CLI 异常提示、Telegram 白名单、Telegram 长轮询自恢复、Feishu 文本/富文本事件、机器人菜单、卡片回调、命令注册、模型菜单和会话回调渲染逻辑。与此同时，项目负责人已完成真实 Telegram 外网联调、真实 Feishu 外网联调与真实 Copilot CLI 集成联调。
 
 ## 2. 测试目标
 1. 验证配置、启动、诊断链路是否可用。
@@ -56,9 +56,9 @@
 2. `tests/test_stores.py`：覆盖对话历史裁剪、坏历史记录跳过、会话激活、陈旧 active 值处理、会话前缀唯一性、模型保存、会话删除、状态摘要、当前会话摘要、后端诊断文本、实时本机会话元数据优先级、本机会话前缀接管、会话菜单合并、会话详情/历史/实时载荷和提交流程中的默认会话元数据落地。
 3. `tests/test_copilot_sessions.py`：覆盖 `session-state` 目录解析、历史提取、排序、删除和路径型会话 ID 拒绝。
 4. `tests/test_agent.py`：覆盖 Copilot CLI 参数组装、流式事件转译、模型帮助文本解析、`copilot help config` 模型段解析、`.ps1` 帮助命令包装、模型列表回退、CLI 未就绪诊断、非零退出码、空输出、超时提示，以及工具摘要、命令输出、JSONL 提取和若干辅助分支。
-5. `tests/test_telegram_helpers.py`：覆盖主菜单、状态面板、后端诊断面板、模型按钮布局、模型列表去重、文本分块、会话菜单分页、会话详情/历史/删除确认按钮、回调 payload 解析、白名单放行、未授权拒绝、命令注册表、Telegram 命令菜单注册列表和回调 pattern。
+5. `tests/test_telegram_helpers.py`：覆盖主菜单、状态面板、后端诊断面板、模型按钮布局、模型列表去重、文本分块、会话菜单分页、会话详情/历史/删除确认按钮、回调 payload 解析、白名单放行、未授权拒绝、命令注册表、Telegram 命令菜单注册列表、回调 pattern、`getUpdates` 超时配置和轮询网络异常重建标记。
 6. `tests/test_feishu_bot.py`：覆盖 Feishu 文本/富文本内容解析、白名单校验、文本事件提交、文本分段进度发送、机器人菜单事件、卡片动作回调、模型切换、会话列表分页、会话详情/历史预览、运行中会话实时刷新和卡片 patch 更新。
-7. `tests/test_cli_main.py`：覆盖 CLI 入口参数分发、首次运行初始化、Telegram-only / 双通道 / Feishu-only 启动、代理环境变量写入和 `__main__` 入口。
+7. `tests/test_cli_main.py`：覆盖 CLI 入口参数分发、首次运行初始化、Telegram-only / 双通道 / Feishu-only 启动、代理环境变量写入、Telegram 轮询重建流程和 `__main__` 入口。
 8. `tests/test_logging_setup.py`：覆盖日志级别解析、根日志处理器替换、文件/控制台级别设置和 `httpx` 日志级别设置。
 9. `tests/conftest.py`：提供测试路径和公共测试夹具。
 
@@ -69,7 +69,7 @@
 
 本次实际结果：
 ```text
-118 passed in 10.10s
+120 passed
 ```
 
 ## 5.2 手工联调结果
@@ -113,6 +113,7 @@
 | TG-10 | 模型菜单去重 | 模型列表含空值和重复值 | 渲染 `/model` 菜单 | 按两列生成按钮，重复模型不重复展示，当前模型带 `✓`，并提供状态、会话和主菜单按钮 |
 | TG-11 | Telegram 命令菜单注册 | 构建 Bot 启动流程 | 读取 `_bot_commands()` | 注册 `start`、`status`、`model`、`sessions`、`session_current`、`session_new`、`session_use`、`whoami`，不注册 `llm` |
 | TG-12 | 主菜单与导航按钮 | 渲染主菜单、状态面板和后端诊断面板 | 调用纯渲染函数 | 按钮 callback_data 使用 `nav:` 前缀并能回到主菜单 |
+| TG-13 | 长轮询网络异常恢复 | Telegram 轮询层抛出无 Update 上下文的 `NetworkError` | 调用 Application error handler | 写入重建标记并停止当前 Application，启动层随后重建轮询实例 |
 
 ### 6.3 Feishu 接入与访问控制模块
 
@@ -170,4 +171,4 @@
 1. 每次执行测试时，需记录执行日期、执行环境、执行人、用例编号、是否通过、失败原因。
 2. 对手工验证项，应附 Telegram / Feishu 截图或日志片段作为证据。
 3. 对自动化测试项，应保存命令输出和失败堆栈。
-4. 2026-06-20 的完整回归结果为 `.\.venv\Scripts\python.exe -m pytest -q`，118 项全部通过，可作为当前提交版的自动化测试基线。
+4. 2026-06-22 的完整回归结果为 `.\.venv\Scripts\python.exe -m pytest -q`，120 项全部通过，可作为当前提交版的自动化测试基线。
