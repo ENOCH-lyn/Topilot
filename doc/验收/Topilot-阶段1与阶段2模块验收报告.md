@@ -27,6 +27,7 @@
 5. 已实现 Telegram / Feishu 双平台配置结构与启停校验。
 6. 已实现 `doctor` 对 Copilot CLI 命令解析、命令可执行性、工作区存在性、Telegram / Feishu 接入配置状态、超时配置和问题清单的诊断输出。
 7. 已实现 `init --force` 交互式配置写入和已有配置保护。
+8. 已提供 `scripts/restart-topilot.ps1` 与 `scripts/restart-topilot.cmd`，用于本机一键恢复 Topilot 与 watchdog。
 
 #### 3.1.2 验收标准逐项结论
 1. 生成 `config.json`：代码具备，满足。
@@ -38,6 +39,7 @@
 7. `topilot init` 在配置已存在时不覆盖并提示 `--force`：代码具备，满足。
 8. `telegram.allowed_chat_ids` 中的非法项会被忽略，合法项仍可正常加载：代码具备，满足。
 9. Feishu-only 模式与至少启用一个平台的约束：代码具备，满足。
+10. 一键恢复脚本可重启 Topilot、执行诊断并重新拉起 watchdog：代码具备，满足。
 
 #### 3.1.3 验收依据
 1. `tests/test_config.py`、`tests/test_cli_main.py` 与 `tests/test_logging_setup.py` 覆盖配置写入备份、配置加载、异常校验、CLI 入口分发、启动代理设置、日志初始化与 `doctor` 诊断输出。
@@ -144,6 +146,7 @@
 3. 已实现 `/model` 按钮菜单、Feishu 模型卡片与模型回调切换。
 4. 已实现模型按 Chat 持久化保存。
 5. 已实现模型列表去重与空值清理，确保按钮展示和合法性校验一致。
+6. 已实现 `auto` 模型模式：默认不向 Copilot CLI 传递 `--model`，由 CLI 自动选择实际模型；过期持久化模型会回退到当前默认模型。
 
 #### 3.5.2 验收标准逐项结论
 1. 实时解析模型列表：代码具备，满足。
@@ -153,13 +156,15 @@
 5. 非法模型拒绝：代码具备，满足。
 6. 模型切换后持久化：代码具备，满足。
 7. 重复模型和空模型值清理：代码具备，满足。
+8. `auto` 模型省略 `--model` 与过期模型回退：代码具备，满足。
 
 #### 3.5.3 验收依据
-1. `tests/test_agent.py` 覆盖模型帮助文本解析、`copilot help config` 模型段解析、重复模型去重、配置列表回退、默认模型兜底和 `.ps1` 帮助命令包装。
+1. `tests/test_agent.py` 覆盖模型帮助文本解析、`copilot help config` 模型段解析、重复模型去重、配置列表回退、默认模型兜底、`auto` 模型省略 `--model` 和 `.ps1` 帮助命令包装。
 2. `tests/test_telegram_helpers.py` 与 `tests/test_feishu_bot.py` 共同覆盖模型菜单展示、模型列表清理、当前模型标识、按钮/卡片 payload 结构和模型切换结果。
 3. 当 Copilot CLI 诊断未就绪时，模型实时发现会跳过失败子进程并回退到配置模型或默认模型，避免 `/model` 入口不可用。
 4. 防误读回归测试验证：当主帮助中 `--model` 不列候选值而 `--output-format` 列出 `text/json` 时，不会把 `text`、`json` 识别为模型。
-5. 真实 Copilot CLI 帮助输出解析、模型展示和模型切换链路已验证通过。
+5. 默认 `auto` 模式验证：正式 CLI 调用不再传递 `--model auto`，持久化旧模型不在当前候选列表时会回退到 `auto`。
+6. 真实 Copilot CLI 帮助输出解析、模型展示和模型切换链路已验证通过。
 
 #### 3.5.4 结论
 满足当前验收范围。

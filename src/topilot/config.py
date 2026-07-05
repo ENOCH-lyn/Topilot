@@ -248,7 +248,7 @@ def default_config_payload(paths: AppPaths) -> dict:
         },
         "copilot": {
             "cli_command": "copilot",
-            "model": "gpt-5-mini",
+            "model": "auto",
             "available_models": [],
             "timeout_seconds": 3600,
             "allow_all_tools": True,
@@ -365,7 +365,7 @@ def doctor_report(app_home: Path | None = None) -> DoctorReport:
             copilot_cli_runnable = _command_is_runnable_for_report(copilot_cli_command)
             if not copilot_cli_runnable:
                 issues.append(f"Copilot CLI 命令不可执行: {copilot_cli_command}")
-            copilot_model = str(copilot.get("model") or "gpt-5-mini").strip() or "gpt-5-mini"
+            copilot_model = str(copilot.get("model") or "auto").strip() or "auto"
             copilot_timeout_seconds = _parse_int(copilot.get("timeout_seconds"), 3600)
             if copilot_timeout_seconds <= 0:
                 issues.append("copilot.timeout_seconds 必须大于 0")
@@ -453,7 +453,7 @@ def load_settings(app_home: Path | None = None) -> Settings:
         session_db_path=session_db_path,
         telegram_proxy_url=(str(telegram.get("proxy_url") or "").strip() or None),
         copilot_cli_command=(str(copilot.get("cli_command") or "copilot").strip() or "copilot"),
-        copilot_cli_model=(str(copilot.get("model") or "gpt-5-mini").strip() or "gpt-5-mini"),
+        copilot_cli_model=(str(copilot.get("model") or "auto").strip() or "auto"),
         copilot_cli_timeout_seconds=_parse_int(copilot.get("timeout_seconds"), 3600),
         copilot_cli_allow_all_tools=_parse_bool(copilot.get("allow_all_tools"), True),
         copilot_cli_allow_all_paths=_parse_bool(copilot.get("allow_all_paths"), False),

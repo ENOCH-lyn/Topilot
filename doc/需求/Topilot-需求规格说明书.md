@@ -130,8 +130,8 @@ Topilot 当前需求拆分为五个核心模块：
 该模块负责在启动时发现当前 Copilot CLI 可用模型，并通过 Telegram 内联按钮与 Feishu 卡片按钮为用户提供可切换入口。
 
 #### 7.5.2 结构化需求
-1. 系统应在启动时优先执行 `copilot --help`，只从 `--model` 参数块解析可用模型列表；若主帮助未列出模型，应继续从 `copilot help config` 的 `model` 配置段解析候选模型。
-2. 当实时解析失败时，系统应回退到配置文件中的 `copilot.available_models` 列表。
+1. 系统应在启动时优先执行 `copilot --help`，只从 `--model` 参数块解析可用模型列表；若主帮助未列出模型且默认模型不是 `auto`，应继续从 `copilot help config` 的 `model` 配置段解析候选模型。
+2. 当实时解析失败时，系统应回退到配置文件中的 `copilot.available_models` 列表；若默认模型为 `auto` 且未配置候选列表，则只展示 `auto`。
 3. `/model` 或对应平台快捷入口应展示当前模型和候选模型按钮。
 4. 用户点击模型按钮后，系统应校验模型合法性，并把模型选择持久化到当前 Chat。
 

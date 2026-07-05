@@ -67,7 +67,7 @@ def run_init(force: bool = False) -> int:
         feishu_app_id = _prompt("Feishu App ID", required=True)
         feishu_app_secret = _prompt("Feishu App Secret", required=True)
     cli_command = _prompt("Copilot CLI 命令", default="copilot")
-    model = _prompt("默认模型", default="gpt-5-mini")
+    model = _prompt("默认模型", default="auto")
     workspace = _prompt("默认工作区路径", default=paths.workspace_dir.as_posix())
     watch_interval = _prompt("会话追踪轮询间隔秒数", default="2")
     add_workspace = _prompt_bool("Copilot 命令自动附带 --add-dir", default=True)

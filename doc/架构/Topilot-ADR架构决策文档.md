@@ -69,7 +69,7 @@ telegram_bot.py / feishu_bot.py
 
 ### 4.4 选择原因
 1. 与项目目标一致，可直接复用现有 Copilot 账号能力。
-2. 当前实现已通过 `--session-id <session_id>`、`--model`、`--output-format json`、`--add-dir` 等参数完成 CLI 对接。
+2. 当前实现已通过 `--session-id <session_id>`、`--output-format json`、`--add-dir` 等参数完成 CLI 对接；当用户显式选择具体模型时才附带 `--model`，默认 `auto` 模式不传该参数。
 3. 能直接利用 Copilot CLI 自带的工具调用和会话系统。
 
 ### 4.5 优缺点

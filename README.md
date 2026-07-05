@@ -62,6 +62,14 @@ topilot doctor
 topilot start
 ```
 
+如果运行中 Telegram 没有响应，可执行一键恢复脚本：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\restart-topilot.ps1
+```
+
+Windows 下也可以双击 `scripts/restart-topilot.cmd`，脚本会重启 Topilot、重新拉起 watchdog，并输出基础健康检查结果。
+
 ## 配置说明
 
 可自行修改配置 JSON 文件，固定位置为 `~/.topilot/config.json`
@@ -92,7 +100,7 @@ topilot start
 - `feishu.allowed_open_ids`：允许访问的 Feishu 用户 open_id 白名单，留空代表不按 open_id 限制
 - `feishu.reply_in_thread`：Feishu 拒绝提示是否使用线程回复
 - `copilot.cli_command`：运行 Copilot CLI 所需的命令，默认 `copilot`
-- `copilot.model`：Copilot CLI 默认使用的模型，默认为 `gpt-5-mini`
+- `copilot.model`：Copilot CLI 默认模型，默认为 `auto`；`auto` 表示交给 Copilot CLI 自动选择模型，Topilot 调用时不传 `--model`
 - `copilot.available_models`：模型实时发现失败时使用的回退候选列表
 - `copilot.timeout_seconds`：单次调用超时秒数，默认为 3600
 - `copilot.allow_all_tools`：调用 Copilot CLI 时是否附带 `--allow-all-tools`

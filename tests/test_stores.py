@@ -164,7 +164,10 @@ def test_session_store_requires_unique_prefix_when_switching(tmp_path: Path) -> 
 def test_task_runner_status_text_includes_model_source_workspace_and_state(make_settings, tmp_path: Path) -> None:
     fake_copilot = tmp_path / "copilot.cmd"
     fake_copilot.write_text("@echo off\n", encoding="utf-8")
-    settings = make_settings(copilot_cli_command=fake_copilot.as_posix())
+    settings = make_settings(
+        copilot_cli_command=fake_copilot.as_posix(),
+        copilot_available_models=["gpt-5"],
+    )
 
     async def _send_message(chat_id: int, text: str) -> None:
         return None
@@ -217,7 +220,7 @@ def test_task_runner_llm_diagnostic_text_exposes_backend_health(make_settings, t
 
 
 def test_task_runner_session_current_text_includes_brief_session_summary(make_settings) -> None:
-    settings = make_settings()
+    settings = make_settings(copilot_available_models=["gpt-5-mini"])
 
     async def _send_message(chat_id: int, text: str) -> None:
         return None
@@ -245,7 +248,7 @@ def test_task_runner_session_current_text_includes_brief_session_summary(make_se
 
 
 def test_task_runner_prefers_live_local_session_metadata_for_summaries(make_settings) -> None:
-    settings = make_settings()
+    settings = make_settings(copilot_available_models=["gpt-5", "gpt-5-mini"])
 
     async def _send_message(chat_id: int, text: str) -> None:
         return None
@@ -328,6 +331,34 @@ def test_task_runner_submit_persists_default_session_metadata(make_settings) -> 
     assert sent == [(100, "done")]
 
 
+def test_task_runner_submit_falls_back_to_auto_for_stale_model(make_settings) -> None:
+    settings = make_settings(copilot_cli_model="auto", copilot_available_models=[])
+    captured: dict[str, object] = {}
+
+    async def _send_message(chat_id: int, text: str) -> None:
+        return None
+
+    class FakePlanner:
+        async def plan(self, session_id, history, instruction, **kwargs):
+            captured["model"] = kwargs.get("model")
+            return PlannedAction(
+                action_type=ActionType.RESPOND_ONLY,
+                summary="ok",
+                assistant_message="done",
+            )
+
+    runner = TaskRunner(settings, _send_message)
+    runner._planner = FakePlanner()
+    runner._sessions.set_model(100, "gpt-5.4-mini")
+
+    import asyncio
+
+    asyncio.run(runner.submit(100, "hello"))
+
+    assert captured["model"] == "auto"
+    assert runner.current_model(100) == "auto"
+
+
 def test_task_runner_session_use_reports_ambiguous_stored_prefix(make_settings) -> None:
     settings = make_settings()
 
@@ -347,7 +378,7 @@ def test_task_runner_session_use_reports_ambiguous_stored_prefix(make_settings) 
 
 
 def test_task_runner_session_use_takes_over_unique_discovered_prefix(make_settings) -> None:
-    settings = make_settings()
+    settings = make_settings(copilot_available_models=["gpt-5"])
 
     async def _send_message(chat_id: int, text: str) -> None:
         return None
@@ -391,7 +422,7 @@ def test_task_runner_start_and_model_helpers_refresh_cached_models(make_settings
     asyncio.run(runner.start())
     runner.set_model(100, "gpt-5")
 
-    assert runner.list_models() == ["gpt-5", "gpt-5-mini", "claude-sonnet-4.6"]
+    assert runner.list_models() == ["auto", "gpt-5", "gpt-5-mini", "claude-sonnet-4.6"]
     assert runner.current_model(100) == "gpt-5"
     assert runner.llm_status_text() == "Copilot CLI 未就绪（命令未找到或不可执行: copilot）"
 

@@ -32,7 +32,7 @@
 ## 4. 核心实现逻辑
 1. `TaskRunner.submit()` 负责拉取最近历史、确保当前会话存在并打开流式输出对象。
 2. `AssistantPlanner.plan()` 使用 `diagnose_copilot_cli()` 判断 CLI 是否就绪，不可用时统一返回后端未就绪提示。
-3. `_build_copilot_argv()` 组装 `--session-id`、`--model`、`--output-format json`、`-p`、`-s`、`--add-dir`、`--allow-all-tools` 等参数。
+3. `_build_copilot_argv()` 组装 `--session-id`、`--output-format json`、`-p`、`-s`、`--add-dir`、`--allow-all-tools` 等参数；当模型不是 `auto` 时才附带 `--model`。
 4. `_forward_stdout_line()` 对每行 JSON 事件进行解析并分发到回复流或过程流。
 5. `TelegramLiveProgress` 负责双消息渲染、限频编辑、重复日志合并和 HTML 回退。
 6. `_FeishuLiveProgress` 负责普通对话过程分段、最终回复发送和多轮过程补充消息控制；状态、模型和会话类快捷操作继续使用 Feishu 卡片链路。

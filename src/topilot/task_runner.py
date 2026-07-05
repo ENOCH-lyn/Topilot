@@ -42,12 +42,12 @@ class TaskRunner:
         self._planner = AssistantPlanner(settings)
         self._inspector = CopilotSessionInspector()
         # 启动后会被实时结果覆盖
-        self._cached_models: list[str] = list(settings.copilot_available_models)
+        self._cached_models: list[str] = self._normalize_model_candidates(settings.copilot_available_models)
         self._discovered_sessions: dict[str, CopilotSessionInfo] = {}
 
     async def start(self) -> None:
         """启动时拉取实时模型列表并缓存"""
-        self._cached_models = await self._planner.fetch_available_models()
+        self._cached_models = self._normalize_model_candidates(await self._planner.fetch_available_models())
         logger.info("可用模型: %s", self._cached_models)
 
     def refresh_discovered_sessions(self, limit: int = 40) -> list[dict]:
@@ -134,7 +134,7 @@ class TaskRunner:
                 running=info.running,
             )
             if info.model:
-                self._sessions.set_model(chat_id, info.model)
+                self._sessions.set_model(chat_id, self._effective_model(info.model))
         chosen = self._sessions.set_active_exact(chat_id, session_id)
         if not chosen:
             return "未找到该会话"
@@ -225,10 +225,10 @@ class TaskRunner:
         self._sessions.touch(chat_id, active_session_id)
 
         live_progress = await self._start_live_progress(chat_id, instruction)
-        model = self._sessions.active_model(chat_id)
+        model = self.current_model(chat_id)
         active_session_meta = self._sessions.get_session(chat_id, active_session_id) or {}
         workspace_dir = str(active_session_meta.get("cwd", "")).strip() or None
-        effective_model = model or self._settings.copilot_cli_model
+        effective_model = model
         effective_workspace = workspace_dir or self._settings.workspace_root.as_posix()
         self._sessions.upsert_session(
             chat_id,
@@ -284,7 +284,7 @@ class TaskRunner:
 
         session_id = self._sessions.ensure_active_session(chat_id)
         session_meta = self._active_session_summary(chat_id, session_id)
-        model = str(session_meta.get("model") or self.current_model(chat_id))
+        model = self._effective_model(str(session_meta.get("model") or self.current_model(chat_id)))
         source = str(session_meta.get("source") or "bot")
         running = bool(session_meta.get("running", False))
         workspace = str(session_meta.get("cwd") or self._settings.workspace_root.as_posix())
@@ -303,37 +303,38 @@ class TaskRunner:
 
     def llm_status_text(self, chat_id: ChatKey | None = None) -> str:
         """返回 LLM 状态文本"""
-        model = self._sessions.active_model(chat_id) if chat_id is not None else None
+        model = self.current_model(chat_id) if chat_id is not None else None
         return self._planner.llm_status_text(model)
 
     def llm_diagnostic_text(self, chat_id: ChatKey | None = None) -> str:
         """返回 LLM 后端详细诊断文本"""
 
-        model = self._sessions.active_model(chat_id) if chat_id is not None else None
+        model = self.current_model(chat_id) if chat_id is not None else None
         diagnostic = self._planner.diagnose_copilot_cli(model=model)
         return diagnostic.render(available_models=self._cached_models)
 
     def current_model(self, chat_id: ChatKey) -> str:
         """返回当前 chat 有效的模型"""
-        return self._sessions.active_model(chat_id) or self._settings.copilot_cli_model
+        return self._effective_model(self._sessions.active_model(chat_id))
 
     def list_models(self) -> list[str]:
         """返回可用模型列表
 
         数据来源是启动时拉取并缓存的结果
         """
-        return list(self._cached_models)
+        return self._normalize_model_candidates(self._cached_models)
 
     def set_model(self, chat_id: ChatKey, model: str) -> None:
         """为指定 chat 设置当前模型"""
-        self._sessions.set_model(chat_id, model)
-        logger.info("模型已切换 chat_id=%s model=%s", chat_id, model)
+        effective_model = self._effective_model(model)
+        self._sessions.set_model(chat_id, effective_model)
+        logger.info("模型已切换 chat_id=%s model=%s", chat_id, effective_model)
 
     def session_current_text(self, chat_id: ChatKey) -> str:
         """返回当前会话简要摘要"""
         session_id = self._sessions.ensure_active_session(chat_id)
         session_meta = self._active_session_summary(chat_id, session_id)
-        model = str(session_meta.get("model") or self.current_model(chat_id))
+        model = self._effective_model(str(session_meta.get("model") or self.current_model(chat_id)))
         source = str(session_meta.get("source") or "bot")
         running = bool(session_meta.get("running", False))
         workspace = str(session_meta.get("cwd") or self._settings.workspace_root.as_posix())
@@ -397,6 +398,33 @@ class TaskRunner:
         if len(local_matches) == 1:
             return self.takeover_session(chat_id, local_matches[0])
         return f"未找到会话: {session_id_prefix}"
+
+    def _effective_model(self, model: str | None) -> str:
+        """返回可安全用于下一次 CLI 调用的模型值"""
+
+        candidate = str(model or "").strip()
+        fallback = self._settings.copilot_cli_model.strip() or "auto"
+        if not candidate:
+            return fallback
+        available = set(self._normalize_model_candidates(self._cached_models))
+        if available and candidate not in available:
+            return fallback
+        return candidate
+
+    def _normalize_model_candidates(self, models: list[str]) -> list[str]:
+        """清理模型候选并确保默认模型可选"""
+
+        seen: set[str] = set()
+        result: list[str] = []
+
+        default_model = self._settings.copilot_cli_model.strip() or "auto"
+        for model in [default_model, *models]:
+            normalized = str(model or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            result.append(normalized)
+        return result
 
     def _ambiguous_session_prefix_text(self, prefix: str, matches: list[str]) -> str:
         """返回前缀歧义提示"""

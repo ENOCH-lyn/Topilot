@@ -20,6 +20,7 @@
 2. 配置文件固定存放在 `~/.topilot/config.json`，避免出现多套配置目录。
 3. `doctor` 不启动 Telegram 或 Feishu，也不调用真实 Copilot 对话，只执行配置、目录、命令可执行性和问题清单诊断，用于启动前检查。
 4. `start` 在 Telegram 长轮询返回后检查 `telegram_restart_requested` 标记；若该标记存在，则等待 2 秒后重建 Telegram Application。
+5. `scripts/restart-topilot.ps1` 提供本机一键恢复入口，负责停止旧进程、重新启动 Topilot、执行 `doctor` 和 Telegram pending 检查，并重新拉起 watchdog。
 
 ### 2.2 配置与路径模块
 
@@ -192,7 +193,7 @@
 | `feishu` | `allowed_open_ids` | array[string]/string | Feishu Open ID 白名单 |
 | `feishu` | `reply_in_thread` | bool | Feishu 拒绝提示是否线程回复 |
 | `copilot` | `cli_command` | string | Copilot CLI 命令 |
-| `copilot` | `model` | string | 默认模型 |
+| `copilot` | `model` | string | 默认模型；`auto` 表示由 Copilot CLI 自动选择模型 |
 | `copilot` | `available_models` | array[string] | 模型回退列表 |
 | `copilot` | `timeout_seconds` | int | 调用超时 |
 | `copilot` | `allow_all_tools` | bool | 是否允许所有工具 |
@@ -273,7 +274,7 @@
         "created_at": "2026-05-03T12:00:00+00:00",
         "last_used_at": "2026-05-03T12:10:00+00:00",
         "cwd": "C:/workspace",
-        "model": "gpt-5-mini",
+        "model": "auto",
         "source": "local",
         "last_event_at": "2026-05-03T12:09:55+00:00",
         "running": true
@@ -281,7 +282,7 @@
     ]
   },
   "models": {
-    "123456": "gpt-5-mini"
+    "123456": "auto"
   }
 }
 ```
@@ -303,8 +304,9 @@
 3. 启动子进程读取主帮助输出，只在 `--model <model>` 自身帮助块内解析 choices，避免误读 `--output-format` 等其他参数的候选值。
 4. 若主帮助未列出模型候选，则继续执行 `copilot help config`，从 `model` 配置段读取模型列表。
 5. 解析引号包裹的模型名称，并去重保留原顺序；Telegram 按钮展示前再次通过 `_normalize_model_list()` 清理空值与重复项，保证按钮展示和合法性校验口径一致。
-6. 若实时解析失败，则回退到配置中的 `available_models`。
-7. 若配置回退列表为空，则至少返回当前默认模型，保证 `/model` 不因空列表失效。
+6. 若默认模型为 `auto` 且未配置 `available_models`，则模型候选只保留 `auto`，避免把当前 CLI 配置帮助中可能不可用于 `--model` 的候选值暴露为默认按钮。
+7. 若实时解析失败，则回退到配置中的 `available_models`。
+8. 若配置回退列表为空，则至少返回当前默认模型，保证 `/model` 不因空列表失效。
 
 ### 5.3 流事件转译算法
 1. 逐行读取 CLI 标准输出。

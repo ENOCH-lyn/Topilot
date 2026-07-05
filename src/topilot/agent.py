@@ -17,6 +17,7 @@ from topilot.config import Settings
 from topilot.models import ActionType, ChatTurn, PlannedAction
 
 URL_PATTERN = re.compile(r"https?://\S+", re.IGNORECASE)
+AUTO_MODEL = "auto"
 
 ProgressLogger = Callable[[str], Awaitable[None]]
 ReplyStreamer = Callable[[str], Awaitable[None]]
@@ -222,6 +223,11 @@ class AssistantPlanner:
             if models:
                 logger.info("实时获取到 %d 个可用模型", len(models))
                 return models
+            if (
+                self._settings.copilot_cli_model.strip().lower() == AUTO_MODEL
+                and not self._settings.copilot_available_models
+            ):
+                return [AUTO_MODEL]
             config_models = await self._fetch_available_models_from_config_help()
             if config_models:
                 logger.info("从配置帮助获取到 %d 个可用模型", len(config_models))
@@ -238,6 +244,12 @@ class AssistantPlanner:
         if fallback_models:
             return fallback_models
         return [self._settings.copilot_cli_model]
+
+    def _should_pass_model_flag(self, model: str | None) -> bool:
+        """判断是否需要把模型选择显式传给 Copilot CLI"""
+
+        normalized = str(model or "").strip().lower()
+        return bool(normalized) and normalized != AUTO_MODEL
 
     def _build_copilot_help_argv(self) -> list[str]:
         """构造 Copilot CLI 帮助命令，兼容 Windows PowerShell 脚本入口"""
@@ -987,14 +999,14 @@ class AssistantPlanner:
         base_args = [
             "--session-id",
             session_id,
-            "--model",
-            effective_model,
             "--output-format",
             "json",
             "-p",
             safe_prompt,
             "-s",
         ]
+        if self._should_pass_model_flag(effective_model):
+            base_args[2:2] = ["--model", effective_model]
         if self._settings.copilot_cli_reasoning_effort:
             base_args.extend(["--reasoning-effort", self._settings.copilot_cli_reasoning_effort])
         if self._settings.copilot_cli_allow_all_paths:

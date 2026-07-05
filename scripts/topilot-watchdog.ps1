@@ -1,6 +1,7 @@
 # Keep the current repo's Topilot process running.
 param(
     [int]$CheckIntervalSeconds = 20,
+    [int]$TelegramPendingRestartThreshold = 2,
     [switch]$RunOnce
 )
 
@@ -27,9 +28,48 @@ function Get-ManagedTopilotProcess {
         Where-Object { $_.Path -eq $topilotExe }
 }
 
+function Stop-ManagedTopilot {
+    param([array]$Processes)
+
+    foreach ($proc in $Processes) {
+        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Start-ManagedTopilot {
     Start-Process -FilePath $topilotExe -ArgumentList "start" -WorkingDirectory $repoRoot -WindowStyle Hidden | Out-Null
     Write-GuardLog "Topilot was not running. Started a new instance."
+}
+
+function Get-TelegramPendingUpdateCount {
+    if (-not (Test-Path $configPath)) {
+        return $null
+    }
+
+    $config = Get-Content -Path $configPath -Raw | ConvertFrom-Json
+    if (-not $config.telegram -or $config.telegram.enabled -eq $false) {
+        return $null
+    }
+
+    $token = [string]$config.telegram.bot_token
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        return $null
+    }
+
+    $uri = "https://api.telegram.org/bot$token/getWebhookInfo"
+    $params = @{
+        Uri = $uri
+        TimeoutSec = 15
+    }
+    if ($config.telegram.proxy_url) {
+        $params.Proxy = [string]$config.telegram.proxy_url
+    }
+
+    $response = Invoke-RestMethod @params
+    if (-not $response.ok) {
+        throw "Telegram getWebhookInfo returned ok=false"
+    }
+    return [int]$response.result.pending_update_count
 }
 
 if (-not (Test-Path $topilotExe)) {
@@ -43,6 +83,7 @@ if (-not (Test-Path $configPath)) {
 }
 
 $lastState = ""
+$telegramPendingStreak = 0
 
 while ($true) {
     try {
@@ -50,8 +91,31 @@ while ($true) {
         if ($proc.Count -eq 0) {
             Start-ManagedTopilot
             $lastState = "restarted"
+            $telegramPendingStreak = 0
         }
         else {
+            try {
+                $pendingCount = Get-TelegramPendingUpdateCount
+                if ($null -ne $pendingCount -and $pendingCount -gt 0) {
+                    $telegramPendingStreak += 1
+                    Write-GuardLog "Telegram pending updates detected. pending=$pendingCount streak=$telegramPendingStreak"
+                    if ($telegramPendingStreak -ge $TelegramPendingRestartThreshold) {
+                        Write-GuardLog "Telegram polling appears stuck. Restarting Topilot. pending=$pendingCount"
+                        Stop-ManagedTopilot -Processes $proc
+                        Start-Sleep -Seconds 2
+                        Start-ManagedTopilot
+                        $lastState = "restarted"
+                        $telegramPendingStreak = 0
+                    }
+                }
+                else {
+                    $telegramPendingStreak = 0
+                }
+            }
+            catch {
+                Write-GuardLog "Telegram health check skipped: $($_.Exception.Message)"
+            }
+
             if ($lastState -ne "running") {
                 Write-GuardLog "Topilot is healthy. pid=$($proc[0].Id)"
                 $lastState = "running"

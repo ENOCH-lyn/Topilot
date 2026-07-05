@@ -58,6 +58,58 @@ def test_build_copilot_argv_uses_allow_all_paths_when_enabled(make_settings, mon
     assert "--add-dir" not in argv
 
 
+def test_build_copilot_argv_omits_model_flag_for_auto_model(make_settings, monkeypatch) -> None:
+    planner = AssistantPlanner(make_settings(copilot_cli_command="copilot.bat", copilot_cli_model="auto"))
+    monkeypatch.setattr(planner, "_resolve_copilot_command", lambda: "copilot.bat")
+
+    argv = planner._build_copilot_argv("hello", "session-123", model="auto")
+
+    assert "--model" not in argv
+    assert "auto" not in argv
+    assert "--output-format" in argv
+
+
+def test_fetch_available_models_falls_back_to_auto_when_model_list_is_empty(make_settings, monkeypatch) -> None:
+    planner = AssistantPlanner(make_settings(copilot_cli_model="auto", copilot_available_models=[]))
+
+    async def _raise_exec(*args, **kwargs):
+        raise FileNotFoundError("missing copilot")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _raise_exec)
+
+    assert asyncio.run(planner.fetch_available_models()) == ["auto"]
+
+
+def test_fetch_available_models_keeps_auto_only_when_no_configured_models(make_settings, monkeypatch) -> None:
+    planner = AssistantPlanner(make_settings(copilot_cli_model="auto", copilot_available_models=[]))
+    calls = {"config_help": 0}
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return (
+                b"""
+                Usage: copilot [options]
+                  --model <model>  Select model
+                """,
+                b"",
+            )
+
+    async def _fake_exec(*args, **kwargs):
+        return FakeProcess()
+
+    async def _config_help():
+        calls["config_help"] += 1
+        return ["gpt-5.4-mini", "gpt-5-mini"]
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(planner, "_fetch_available_models_from_config_help", _config_help)
+
+    assert asyncio.run(planner.fetch_available_models()) == ["auto"]
+    assert calls["config_help"] == 0
+
+
 def test_allowed_dirs_for_command_deduplicates_paths(make_settings) -> None:
     workspace_dir = "C:/sandbox/project"
     extra_dir = "C:/sandbox/desktop"
